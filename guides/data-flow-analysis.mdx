@@ -1,0 +1,499 @@
+---
+title: 'Data Flow Analysis'
+description: 'Track values, analyze variables, and understand data dependencies in binary code'
+icon: 'diagram-project'
+---
+
+## Overview
+
+Data flow analysis tracks how values propagate through a program. Binary Ninja provides powerful APIs for value tracking, variable analysis, and understanding data dependencies. This guide demonstrates practical data flow analysis techniques.
+
+## Register Value Tracking
+
+Binary Ninja can determine register values at specific program points through static analysis.
+
+<Steps>
+  <Step title="Get Register Value at Address">
+    ```python
+    from binaryninja import RegisterValueType
+
+    func = bv.get_function_at(0x401000)
+    address = 0x401234
+    arch = func.arch
+
+    # Get value of register at this address
+    value = func.get_reg_value_at(address, "rax", arch)
+
+    if value.type == RegisterValueType.ConstantValue:
+        print(f"rax = {value.value:#x}")
+    elif value.type == RegisterValueType.UndeterminedValue:
+        print("rax value cannot be determined")
+    ```
+  </Step>
+
+  <Step title="Get Value After Instruction">
+    ```python
+    # Get register value AFTER instruction executes
+    value_after = func.get_reg_value_after(address, "rax", arch)
+
+    if value_after.type == RegisterValueType.ConstantValue:
+        print(f"After instruction: rax = {value_after.value:#x}")
+    ```
+  </Step>
+
+  <Step title="Track Possible Values">
+    When static analysis can't determine an exact value, use IL to get possible values:
+
+    ```python
+    if value.type == RegisterValueType.UndeterminedValue:
+        # Get IL instruction at this address
+        instr_start = func.low_level_il.get_instruction_start(address, arch)
+        instr = func.low_level_il[instr_start]
+
+        if instr is not None:
+            # Get set of possible values
+            possible = instr.get_possible_reg_values("rax")
+            print(f"Possible values: {possible}")
+
+            # Get possible values after instruction
+            possible_after = instr.get_possible_reg_values_after("rax")
+            print(f"Possible values after: {possible_after}")
+    ```
+  </Step>
+</Steps>
+
+### Register Value Types
+
+| Type | Description | Example |
+|------|-------------|----------|
+| `ConstantValue` | Known constant | `0x1234` |
+| `StackFrameOffset` | Offset from stack frame | `rbp - 0x10` |
+| `ConstantPointerValue` | Pointer to known address | `&data_section` |
+| `UndeterminedValue` | Cannot determine | Unknown |
+| `EntryValue` | Value at function entry | `arg1` |
+
+## Building a Register Tracker
+
+This example creates a render layer that tracks register values throughout a function.
+
+```python
+from binaryninja import RenderLayer, RegisterValueType, InstructionTextToken
+from binaryninja import InstructionTextTokenType, DisassemblyTextLine
+
+class FollowRegRenderLayer(RenderLayer):
+    name = "Follow Register"
+
+    def __init__(self, handle=None):
+        super().__init__(handle)
+        self.followed_reg = "rax"  # Register to track
+
+    def apply_to_lines(self, block, lines):
+        if self.followed_reg is None:
+            return lines
+
+        func = block.function
+        arch = block.arch
+
+        # Track register at each instruction
+        for i, line in enumerate(lines):
+            # Skip non-instruction lines
+            if not any(token.type == InstructionTextTokenType.AddressSeparatorToken
+                      for token in line.tokens):
+                continue
+
+            # Check if this instruction modifies our register
+            written = False
+            for w in func.get_regs_written_by(line.address, arch):
+                if arch.regs[w].full_width_reg == arch.regs[self.followed_reg].full_width_reg:
+                    written = True
+                    break
+
+            if written:
+                # Add annotation showing value after instruction
+                line.tokens.extend([
+                    InstructionTextToken(InstructionTextTokenType.CommentToken,
+                                       f'  // {self.followed_reg} after: ')
+                ])
+
+                after = func.get_reg_value_after(line.address, self.followed_reg, arch)
+                if after.type == RegisterValueType.UndeterminedValue:
+                    # Use IL to get possible values
+                    if line.il_instruction is not None:
+                        instr = line.il_instruction
+                    else:
+                        instr_start = func.low_level_il.get_instruction_start(
+                            line.address, arch)
+                        instr = func.low_level_il[instr_start]
+
+                    if instr is not None:
+                        after_possible = instr.get_possible_reg_values_after(
+                            self.followed_reg)
+                        line.tokens.append(
+                            InstructionTextToken(InstructionTextTokenType.CommentToken,
+                                               str(after_possible))
+                        )
+                else:
+                    line.tokens.append(
+                        InstructionTextToken(InstructionTextTokenType.CommentToken,
+                                           str(after))
+                    )
+
+        return lines
+```
+
+See full implementation: `~/workspace/source/python/examples/follow_reg_render_layer.py:1`
+
+## Variable Analysis
+
+Medium Level IL uses variables instead of registers, making data flow analysis more intuitive.
+
+<Tabs>
+  <Tab title="List Variables">
+    ```python
+    func = bv.get_function_at(0x401000)
+
+    # Get all variables in function
+    for var in func.vars:
+        print(f"{var.name}: {var.type}")
+
+    # Separate by type
+    print("\nStack variables:")
+    for var in func.stack_layout:
+        print(f"  {var.name} @ {var.storage:#x}: {var.type}")
+
+    print("\nRegister variables:")
+    for var in func.vars:
+        if hasattr(var, 'source_type'):
+            print(f"  {var.name}: {var.type}")
+    ```
+  </Tab>
+
+  <Tab title="Track Variable Uses">
+    ```python
+    from binaryninja.enums import MediumLevelILOperation
+
+    mlil = func.medium_level_il
+
+    # Find all uses of a variable
+    target_var = func.vars[0]
+
+    for instr in mlil.instructions:
+        # Check if instruction uses our variable
+        if instr.operation == MediumLevelILOperation.MLIL_VAR:
+            if instr.src == target_var:
+                print(f"{instr.address:#x}: Variable used")
+
+        elif instr.operation == MediumLevelILOperation.MLIL_SET_VAR:
+            if instr.dest == target_var:
+                print(f"{instr.address:#x}: Variable assigned = {instr.src}")
+    ```
+  </Tab>
+
+  <Tab title="SSA Variable Tracking">
+    ```python
+    # Use SSA form for precise tracking
+    mlil_ssa = func.medium_level_il.ssa_form
+
+    for instr in mlil_ssa.instructions:
+        if instr.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA:
+            var = instr.dest
+            print(f"{var.var.name}#{var.version} = {instr.src}")
+
+            # Find all uses of this SSA variable
+            for use in mlil_ssa.get_ssa_var_uses(var):
+                print(f"  Used at {use.address:#x}")
+    ```
+  </Tab>
+</Tabs>
+
+## Finding Data Dependencies
+
+Trace how data flows from sources to sinks.
+
+<Steps>
+  <Step title="Identify Source">
+    ```python
+    from binaryninja.enums import MediumLevelILOperation
+
+    # Find where a variable is defined
+    def find_definition(func, target_var, instr_index):
+        mlil_ssa = func.medium_level_il.ssa_form
+        instr = mlil_ssa[instr_index]
+
+        # Get SSA variable at this point
+        if instr.operation == MediumLevelILOperation.MLIL_VAR_SSA:
+            ssa_var = instr.src
+            # Find definition
+            def_instr = mlil_ssa.get_ssa_var_definition(ssa_var)
+            return def_instr
+
+        return None
+    ```
+  </Step>
+
+  <Step title="Track Uses">
+    ```python
+    def find_uses(func, ssa_var):
+        """Find all instructions that use this SSA variable"""
+        mlil_ssa = func.medium_level_il.ssa_form
+        uses = mlil_ssa.get_ssa_var_uses(ssa_var)
+        return uses
+    ```
+  </Step>
+
+  <Step title="Build Dependency Graph">
+    ```python
+    def build_dependencies(func, start_instr):
+        """Build dependency graph from instruction"""
+        visited = set()
+        dependencies = {}
+
+        def visit(instr):
+            if instr.instr_index in visited:
+                return
+            visited.add(instr.instr_index)
+
+            # Get all variables read by this instruction
+            for var in instr.vars_read:
+                # Find definition
+                def_instr = func.medium_level_il.ssa_form.get_ssa_var_definition(var)
+                if def_instr is not None:
+                    dependencies[instr.instr_index] = dependencies.get(
+                        instr.instr_index, []) + [def_instr.instr_index]
+                    visit(def_instr)
+
+        visit(start_instr)
+        return dependencies
+    ```
+  </Step>
+</Steps>
+
+## Taint Analysis Example
+
+Track potentially dangerous data from input to sensitive operations.
+
+```python
+from binaryninja.enums import MediumLevelILOperation
+
+def taint_analysis(func, taint_sources):
+    """
+    Perform forward taint analysis
+
+    Args:
+        func: Function to analyze
+        taint_sources: Set of SSA variables that are tainted
+
+    Returns:
+        Set of all tainted SSA variables
+    """
+    mlil_ssa = func.medium_level_il.ssa_form
+    tainted = set(taint_sources)
+    worklist = list(taint_sources)
+
+    while worklist:
+        ssa_var = worklist.pop()
+
+        # Find all uses of this variable
+        for use_instr in mlil_ssa.get_ssa_var_uses(ssa_var):
+            # If instruction produces output, taint it
+            if use_instr.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA:
+                dest = use_instr.dest
+                if dest not in tainted:
+                    tainted.add(dest)
+                    worklist.append(dest)
+
+            elif use_instr.operation == MediumLevelILOperation.MLIL_CALL_SSA:
+                # Taint return value
+                for output in use_instr.output:
+                    if output not in tainted:
+                        tainted.add(output)
+                        worklist.append(output)
+
+    return tainted
+
+# Example: Taint all data from read() syscalls
+from binaryninja.enums import LowLevelILOperation
+
+taint_sources = set()
+for func in bv.functions:
+    mlil_ssa = func.medium_level_il.ssa_form
+
+    for instr in mlil_ssa:
+        if instr.operation == MediumLevelILOperation.MLIL_SYSCALL_SSA:
+            # Check if it's read() (syscall 0 on Linux x64)
+            llil = func.low_level_il[instr.address]
+            if llil.operation == LowLevelILOperation.LLIL_SYSCALL:
+                syscall_num = func.get_reg_value_at(
+                    llil.address, "rax", func.arch).value
+                if syscall_num == 0:  # read syscall
+                    # Taint outputs
+                    for output in instr.output:
+                        taint_sources.add(output)
+
+    tainted = taint_analysis(func, taint_sources)
+    print(f"Function {func.name}: {len(tainted)} tainted variables")
+```
+
+## Pointer Analysis
+
+Analyze pointer values and memory accesses.
+
+```python
+from binaryninja.enums import MediumLevelILOperation
+
+def find_memory_accesses(func, target_address):
+    """Find all memory accesses to a specific address"""
+    mlil = func.medium_level_il
+
+    loads = []
+    stores = []
+
+    for instr in mlil:
+        # Check loads
+        if instr.operation == MediumLevelILOperation.MLIL_LOAD:
+            src = instr.src
+            if src.operation == MediumLevelILOperation.MLIL_CONST_PTR:
+                if src.constant == target_address:
+                    loads.append(instr.address)
+
+        # Check stores
+        elif instr.operation == MediumLevelILOperation.MLIL_STORE:
+            dest = instr.dest
+            if dest.operation == MediumLevelILOperation.MLIL_CONST_PTR:
+                if dest.constant == target_address:
+                    stores.append(instr.address)
+
+    return loads, stores
+
+# Find all accesses to global variable
+global_addr = 0x404000
+for func in bv.functions:
+    loads, stores = find_memory_accesses(func, global_addr)
+    if loads or stores:
+        print(f"Function {func.name}:")
+        print(f"  Reads: {[f'{addr:#x}' for addr in loads]}")
+        print(f"  Writes: {[f'{addr:#x}' for addr in stores]}")
+```
+
+## Jump Table Resolution
+
+Resolve indirect jumps and switch statements.
+
+```python
+def resolve_jump_table(bv, func, jump_addr):
+    """
+    Resolve jump table targets
+
+    Args:
+        bv: BinaryView
+        func: Function containing jump
+        jump_addr: Address of indirect jump
+
+    Returns:
+        List of (arch, target_addr) tuples
+    """
+    import struct
+
+    arch = func.arch
+    addrsize = arch.address_size
+
+    # Get instruction tokens to find table address
+    tokens, length = arch.get_instruction_text(
+        bv.read(jump_addr, 16), jump_addr)
+
+    branches = []
+    for token in tokens:
+        if token.type == InstructionTextTokenType.PossibleAddressToken:
+            tbl = token.value
+            print(f"Found possible table at {tbl:#x}")
+
+            i = 0
+            while True:
+                # Read pointer from table
+                data = bv.read(tbl + (i * addrsize), addrsize)
+                if len(data) != addrsize:
+                    break
+
+                if addrsize == 4:
+                    ptr = struct.unpack("<I", data)[0]
+                else:
+                    ptr = struct.unpack("<Q", data)[0]
+
+                # Check if pointer is valid
+                if (ptr >= bv.start) and (ptr < bv.end):
+                    print(f"Found destination {ptr:#x}")
+                    branches.append((arch, ptr))
+                else:
+                    break
+
+                i += 1
+
+    # Set discovered targets
+    func.set_user_indirect_branches(jump_addr, branches)
+    return branches
+```
+
+Full implementation: `~/workspace/source/python/examples/jump_table.py:1`
+
+## Cross References
+
+Find code and data references to and from addresses.
+
+```python
+# Find all code references TO an address
+code_refs = bv.get_code_refs(0x401000)
+for ref in code_refs:
+    print(f"Called from {ref.address:#x} in {ref.function.name}")
+
+# Find all code references FROM a function
+func = bv.get_function_at(0x401000)
+for ref in func.call_sites:
+    print(f"Calls to {ref.address:#x}")
+
+# Find data references
+data_refs = bv.get_data_refs(0x404000)
+for ref in data_refs:
+    print(f"Data accessed from {ref:#x}")
+
+# Find what an address references
+refs_from = bv.get_code_refs_from(0x401234)
+for ref in refs_from:
+    print(f"References {ref.address:#x}")
+```
+
+## Output Example
+
+```
+Function sub_401000:
+  rax after: 0x1234
+  rbx after: <undetermined>
+  Possible values: {0x1000, 0x2000, 0x3000}
+
+Function sub_401100:
+  Variable arg1 used at 0x401110
+  Variable var_10#1 = 0x5678
+  Variable var_10#1 used at 0x401120
+  Variable var_10#2 = var_10#1 + 1
+
+Tainted variables: 12
+  var_8#1 (from read syscall)
+  var_10#2 (flows from var_8#1)
+  rdi#3 (flows from var_10#2)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="IL Operations" icon="diagram-nested" href="/guides/il-operations">
+    Learn more about working with IL representations
+  </Card>
+  <Card title="Binary Analysis" icon="magnifying-glass-chart" href="/guides/binary-analysis">
+    Master fundamental binary analysis techniques
+  </Card>
+</CardGroup>
+
+## Related Resources
+
+- [Function API Reference](/api/function)
+- [Variable API Reference](/api/variable)
+- [MLIL SSA Reference](/api/mlil-ssa)

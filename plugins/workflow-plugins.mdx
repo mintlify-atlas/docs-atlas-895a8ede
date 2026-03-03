@@ -1,0 +1,427 @@
+---
+title: Workflow plugins
+description: Modify the Binary Ninja analysis pipeline
+---
+
+Workflow plugins allow you to extend or modify Binary Ninja's analysis pipeline. You can add custom analysis passes, modify IL during analysis, or implement specialized analysis techniques.
+
+## Analysis workflows
+
+Binary Ninja's analysis is organized into workflows - sequences of analysis activities that run in order:
+
+```
+Load Binary → Create Functions → Generate LLIL → Generate MLIL → Generate HLIL → Type Analysis
+```
+
+Each step is an **activity** that can be:
+- Extended with custom logic
+- Replaced entirely
+- Disabled
+- Reordered
+
+## When to create workflow plugins
+
+Create a workflow plugin to:
+- Add custom analysis passes
+- Modify IL during analysis
+- Implement domain-specific optimizations
+- Add taint tracking or data flow analysis
+- Customize function detection
+
+<Info>
+  Workflow plugins run during analysis, before the user sees results.
+</Info>
+
+## Creating a workflow activity
+
+A workflow activity performs a specific analysis task:
+
+```cpp inliner.cpp
+#include "binaryninjaapi.h"
+
+using namespace BinaryNinja;
+
+void FunctionInliner(Ref<AnalysisContext> analysisContext) {
+    Ref<Function> function = analysisContext->GetFunction();
+    Ref<LowLevelILFunction> llilFunc = analysisContext->GetLowLevelILFunction();
+
+    // Iterate through LLIL instructions
+    for (auto& block : llilFunc->GetBasicBlocks()) {
+        for (size_t i = block->GetStart(); i < block->GetEnd(); i++) {
+            LowLevelILInstruction instr = llilFunc->GetInstruction(i);
+
+            // Find call instructions
+            if (instr.operation == LLIL_CALL) {
+                // Get call target
+                LowLevelILInstruction destExpr = instr.GetDestExpr<LLIL_CALL>();
+                RegisterValue target = destExpr.GetValue();
+
+                if (target.IsConstant()) {
+                    // Inline the called function
+                    uint64_t targetAddr = target.value;
+                    Ref<Function> targetFunc = 
+                        function->GetView()->GetAnalysisFunction(
+                            function->GetPlatform(), 
+                            targetAddr
+                        );
+
+                    if (targetFunc) {
+                        // Replace call with inlined IL
+                        InlineFunctionAtCallSite(llilFunc, instr, targetFunc);
+                    }
+                }
+            }
+        }
+    }
+}
+
+extern "C" {
+    BN_DECLARE_CORE_ABI_VERSION
+
+    BINARYNINJAPLUGIN bool CorePluginInit() {
+        // Register the activity
+        Workflow::Instance("core.function.baseAnalysis")->RegisterActivity(
+            new Activity("extension.functionInliner", &FunctionInliner)
+        );
+
+        // Insert after LLIL generation
+        Workflow::Instance("core.function.baseAnalysis")->Insert(
+            "core.function.generateLowLevelIL",
+            "extension.functionInliner"
+        );
+
+        return true;
+    }
+}
+```
+
+From [`examples/workflows/inliner/`](https://github.com/Vector35/binaryninja-api/tree/dev/examples/workflows/inliner)
+
+<Note>
+  This example inlines simple function calls during LLIL generation.
+</Note>
+
+## Workflow structure
+
+Workflows are registered by name and contain ordered activities:
+
+```python
+from binaryninja import Workflow, Activity
+
+# Get a workflow
+workflow = Workflow.Instance("core.function.baseAnalysis")
+
+# List activities
+for activity in workflow.activities:
+    print(f"{activity.name}: {activity.description}")
+
+# Activity graph shows dependencies
+print(workflow.graph)
+```
+
+### Built-in workflows
+
+- `core.function.baseAnalysis` - Main function analysis
+- `core.module.defaultAnalysis` - Binary-wide analysis  
+- `core.function.objectiveC` - Objective-C specific analysis
+
+## Registering activities
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    from binaryninja import Workflow, Activity
+
+    def my_analysis_activity(analysis_context):
+        function = analysis_context.function
+        llil = analysis_context.llil
+
+        # Perform custom analysis
+        for block in llil:
+            for instr in block:
+                if instr.operation == LowLevelILOperation.LLIL_CALL:
+                    # Analyze call
+                    pass
+
+    # Register the activity
+    activity = Activity(
+        "myplugin.customAnalysis",
+        my_analysis_activity
+    )
+
+    workflow = Workflow.Instance("core.function.baseAnalysis")
+    workflow.register_activity(activity)
+
+    # Insert after LLIL generation
+    workflow.insert("core.function.generateLowLevelIL", "myplugin.customAnalysis")
+    ```
+  </Tab>
+  <Tab title="C++">
+    ```cpp
+    void MyAnalysisActivity(Ref<AnalysisContext> context) {
+        Ref<Function> func = context->GetFunction();
+        Ref<LowLevelILFunction> llil = context->GetLowLevelILFunction();
+
+        // Perform analysis
+    }
+
+    extern "C" {
+        BINARYNINJAPLUGIN bool CorePluginInit() {
+            auto workflow = Workflow::Instance("core.function.baseAnalysis");
+
+            workflow->RegisterActivity(
+                new Activity("myplugin.customAnalysis", &MyAnalysisActivity)
+            );
+
+            workflow->Insert(
+                "core.function.generateLowLevelIL",
+                "myplugin.customAnalysis"
+            );
+
+            return true;
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Activity placement
+
+Control where your activity runs in the workflow:
+
+```python
+# Insert after an activity
+workflow.insert("core.function.generateLowLevelIL", "myplugin.activity")
+
+# Insert before an activity  
+workflow.insert_before("core.function.generateLowLevelIL", "myplugin.activity")
+
+# Replace an activity
+workflow.replace("core.function.basicBlockAnalysis", "myplugin.customBasicBlock")
+
+# Remove an activity
+workflow.remove("core.function.advancedAnalysisCache")
+```
+
+<Warning>
+  Removing or replacing core activities can break analysis. Only do this if you understand the implications.
+</Warning>
+
+## Analysis context
+
+The `AnalysisContext` provides access to the function being analyzed:
+
+```python
+def my_activity(analysis_context):
+    # Function being analyzed
+    func = analysis_context.function
+
+    # Binary view
+    bv = analysis_context.function.view
+
+    # IL representations
+    llil = analysis_context.llil
+    mlil = analysis_context.mlil
+    hlil = analysis_context.hlil
+
+    # Basic blocks
+    basic_blocks = analysis_context.basic_blocks
+
+    # Lifted IL (during initial lifting)
+    lifted_il = analysis_context.lifted_il
+```
+
+## Modifying IL during analysis
+
+You can modify IL before it's finalized:
+
+```python
+from binaryninja import LowLevelILOperation
+
+def optimize_il(analysis_context):
+    llil = analysis_context.llil
+
+    for block in llil:
+        for i, instr in enumerate(block):
+            # Find redundant operations
+            if instr.operation == LowLevelILOperation.LLIL_SET_REG:
+                src = instr.src
+                if src.operation == LowLevelILOperation.LLIL_REG:
+                    # Remove mov reg, reg
+                    if instr.dest == src.src:
+                        instr.replace(llil.nop())
+```
+
+<Info>
+  IL modification must happen before analysis is complete. Use early activities like those after LLIL generation.
+</Info>
+
+## Workflow configuration
+
+Users can configure workflows through settings:
+
+```python
+from binaryninja import Settings
+
+# Register workflow settings
+Settings().register_group("workflows.myplugin", "My Plugin")
+Settings().register_setting(
+    "workflows.myplugin.enabled",
+    '''{
+        "title": "Enable Custom Analysis",
+        "type": "boolean",
+        "default": true
+    }'''
+)
+
+# Check setting in activity
+def my_activity(analysis_context):
+    if not Settings().get_bool("workflows.myplugin.enabled"):
+        return
+
+    # Perform analysis
+```
+
+## Cloning workflows
+
+Create custom workflows based on existing ones:
+
+```python
+# Clone the default workflow
+custom_workflow = Workflow.Instance("core.function.baseAnalysis").clone("myWorkflow")
+
+# Modify it
+custom_workflow.insert("core.function.generateLowLevelIL", "myplugin.activity")
+custom_workflow.remove("core.function.advancedAnalysisCache")
+
+# Register it
+custom_workflow.register()
+
+# Use it for a function
+func.workflow = custom_workflow
+```
+
+## Common workflow patterns
+
+<AccordionGroup>
+  <Accordion title="Adding taint analysis">
+    Track data flow from sources to sinks:
+
+    ```python
+    def taint_analysis(analysis_context):
+        mlil = analysis_context.mlil
+        tainted = set()
+
+        for block in mlil:
+            for instr in block:
+                # Mark sources as tainted
+                if is_source(instr):
+                    tainted.add(instr.dest)
+
+                # Propagate taint
+                for operand in instr.operands:
+                    if operand in tainted:
+                        if instr.dest:
+                            tainted.add(instr.dest)
+
+                # Check sinks
+                if is_sink(instr):
+                    for operand in instr.operands:
+                        if operand in tainted:
+                            report_issue(instr)
+    ```
+  </Accordion>
+
+  <Accordion title="Custom calling convention detection">
+    Detect non-standard calling conventions:
+
+    ```python
+    def detect_calling_convention(analysis_context):
+        func = analysis_context.function
+        llil = analysis_context.llil
+
+        # Analyze first basic block for parameter passing
+        entry = llil.basic_blocks[0]
+        params = analyze_register_usage(entry)
+
+        # Set detected calling convention
+        if matches_custom_cc(params):
+            func.calling_convention = my_custom_cc
+    ```
+  </Accordion>
+
+  <Accordion title="Dead code elimination">
+    Remove unused code:
+
+    ```python
+    def eliminate_dead_code(analysis_context):
+        mlil = analysis_context.mlil
+
+        # Find live variables
+        live = compute_live_variables(mlil)
+
+        # Remove dead assignments
+        for block in mlil:
+            for instr in block:
+                if instr.operation == MediumLevelILOperation.MLIL_SET_VAR:
+                    if instr.dest not in live:
+                        instr.replace(mlil.nop())
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Example: Objective-C workflow
+
+The Objective-C workflow plugin is a complete example:
+
+```
+workflow_objc/
+  ├─ CMakeLists.txt
+  ├─ src/
+  │   └─ workflow_objc.cpp
+  └─ demo/
+      └─ test.m
+```
+
+From [`plugins/workflow_objc/`](https://github.com/Vector35/binaryninja-api/tree/dev/plugins/workflow_objc)
+
+## Testing workflows
+
+```python
+from binaryninja import BinaryViewType
+
+# Load test binary
+bv = BinaryViewType['Raw'].open('test.bin')
+
+# Apply custom workflow
+for func in bv.functions:
+    func.workflow = Workflow.Instance("myWorkflow")
+
+# Reanalyze
+bv.update_analysis_and_wait()
+
+# Verify results
+for func in bv.functions:
+    print(f"{func.name}: {len(func.basic_blocks)} blocks")
+```
+
+## Performance considerations
+
+<Warning>
+  Workflow activities run during analysis. Keep them efficient:
+  - Avoid expensive operations in hot loops
+  - Cache computed results
+  - Use progress indicators for long operations
+  - Consider parallelization for independent functions
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="IL operations guide" href="/guides/il-operations">
+    Learn about IL operations
+  </Card>
+  <Card title="Data flow analysis" href="/guides/data-flow-analysis">
+    Implement advanced analysis
+  </Card>
+</CardGroup>

@@ -1,0 +1,406 @@
+---
+title: BinaryView Class
+description: C++ API reference for the BinaryView class - the main interface for binary analysis
+---
+
+The `BinaryView` class is the primary interface for interacting with binary files in Binary Ninja. It provides methods for reading data, navigating segments, accessing functions, and managing analysis.
+
+## Class Declaration
+
+Defined in `binaryninjaapi.h:5541`
+
+```cpp
+namespace BinaryNinja {
+    class BinaryView : public CoreRefCountObject<BNBinaryView, 
+                                                   BNNewViewReference, 
+                                                   BNFreeBinaryView>
+    {
+    protected:
+        Ref<FileMetadata> m_file;
+        std::unique_ptr<MemoryMap> m_memoryMap;
+
+        // Constructor for custom BinaryView implementations
+        BinaryView(const std::string& typeName, 
+                   FileMetadata* file, 
+                   BinaryView* parentView = nullptr);
+
+    public:
+        // Public interface methods
+        // ...
+    };
+}
+```
+
+## Creating and Loading Binary Views
+
+### Load a Binary File
+
+```cpp
+Ref<BinaryView> BinaryNinja::Load(const std::string& filename);
+```
+
+Loads a binary file and returns a BinaryView. The appropriate view type (PE, ELF, Mach-O, etc.) is automatically detected.
+
+**Example:**
+```cpp
+Ref<BinaryView> bv = BinaryNinja::Load("/path/to/binary");
+if (!bv || bv->GetTypeName() == "Raw") {
+    cerr << "Failed to load executable" << endl;
+    return -1;
+}
+```
+
+### Get View Type
+
+```cpp
+std::string GetTypeName() const;
+```
+
+Returns the type name of the binary view (e.g., "PE", "ELF", "Mach-O", "Raw").
+
+## Reading Binary Data
+
+### Read Bytes
+
+```cpp
+size_t Read(void* dest, uint64_t offset, size_t len);
+```
+
+Reads `len` bytes from virtual address `offset` into the buffer `dest`.
+
+**Parameters:**
+- `dest` - Destination buffer
+- `offset` - Virtual address to read from
+- `len` - Number of bytes to read
+
+**Returns:** Number of bytes actually read
+
+**Example:**
+```cpp
+uint8_t buffer[256];
+size_t bytesRead = bv->Read(buffer, 0x401000, sizeof(buffer));
+```
+
+### Write Bytes
+
+```cpp
+size_t Write(uint64_t offset, const void* data, size_t len);
+```
+
+Writes `len` bytes from `data` to virtual address `offset`.
+
+## Address Information
+
+### Get Entry Point
+
+```cpp
+uint64_t GetEntryPoint() const;
+```
+
+Returns the entry point address of the binary.
+
+### Get Start Address
+
+```cpp
+uint64_t GetStart() const;
+```
+
+Returns the starting address of the binary.
+
+### Get Length
+
+```cpp
+uint64_t GetLength() const;
+```
+
+Returns the total length of the binary view.
+
+### Address Validation
+
+```cpp
+bool IsValidOffset(uint64_t offset) const;
+bool IsOffsetReadable(uint64_t offset) const;
+bool IsOffsetWritable(uint64_t offset) const;
+bool IsOffsetExecutable(uint64_t offset) const;
+```
+
+Check properties of a virtual address.
+
+**Example:**
+```cpp
+if (bv->IsOffsetExecutable(addr)) {
+    // Address contains executable code
+}
+```
+
+## Function Access
+
+### Get All Functions
+
+```cpp
+std::vector<Ref<Function>> GetAnalysisFunctionList();
+```
+
+Returns a list of all functions discovered during analysis.
+
+**Example:**
+```cpp
+for (auto func : bv->GetAnalysisFunctionList()) {
+    cout << "Function at 0x" << hex << func->GetStart() 
+         << ": " << func->GetSymbol()->GetFullName() << endl;
+}
+```
+
+### Get Function at Address
+
+```cpp
+Ref<Function> GetAnalysisFunction(Ref<Platform> platform, uint64_t addr);
+```
+
+Returns the function containing the specified address, or nullptr if none exists.
+
+**Example:**
+```cpp
+Ref<Function> func = bv->GetAnalysisFunction(bv->GetDefaultPlatform(), 0x401000);
+if (func) {
+    cout << "Found function: " << func->GetSymbol()->GetFullName() << endl;
+}
+```
+
+### Get Entry Functions
+
+```cpp
+std::vector<Ref<Function>> GetAllEntryFunctions();
+```
+
+Returns all functions marked as entry points.
+
+**Example:**
+```cpp
+for (auto func : bv->GetAllEntryFunctions()) {
+    cout << "Entry function: " << func->GetSymbol()->GetFullName() << endl;
+}
+```
+
+## Platform and Architecture
+
+### Get Default Platform
+
+```cpp
+Ref<Platform> GetDefaultPlatform() const;
+```
+
+Returns the default platform for this binary.
+
+**Example:**
+```cpp
+Ref<Platform> platform = bv->GetDefaultPlatform();
+cout << "Platform: " << platform->GetName() << endl;
+cout << "Architecture: " << platform->GetArchitecture()->GetName() << endl;
+```
+
+### Get Default Architecture
+
+```cpp
+Ref<Architecture> GetDefaultArchitecture() const;
+```
+
+Returns the default architecture for this binary.
+
+## Segments and Sections
+
+### Get Segments
+
+```cpp
+std::vector<Ref<Segment>> GetSegments();
+```
+
+Returns all segments in the binary.
+
+### Get Sections
+
+```cpp
+std::vector<Ref<Section>> GetSections();
+std::vector<Ref<Section>> GetSectionsAt(uint64_t addr);
+```
+
+Returns sections in the binary or at a specific address.
+
+## Strings
+
+### Get String References
+
+```cpp
+std::vector<BNStringReference> GetStrings();
+std::vector<BNStringReference> GetStrings(uint64_t start, uint64_t len);
+```
+
+Returns all strings found in the binary or in a specific range.
+
+**Example:**
+```cpp
+for (auto str_ref : bv->GetStrings()) {
+    char* str = new char[str_ref.length + 1];
+    bv->Read(str, str_ref.start, str_ref.length);
+    str[str_ref.length] = '\0';
+    
+    cout << "String at 0x" << hex << str_ref.start 
+         << ": " << str << endl;
+    
+    delete[] str;
+}
+```
+
+See the [bin-info example](https://github.com/Vector35/binaryninjaapi/blob/dev/examples/bin-info/src/bin-info.cpp:78-91) for complete code.
+
+## Symbols
+
+### Get Symbol
+
+```cpp
+Ref<Symbol> GetSymbolByAddress(uint64_t addr);
+Ref<Symbol> GetSymbolByRawName(const std::string& name);
+```
+
+Lookup symbols by address or name.
+
+### Get All Symbols
+
+```cpp
+std::vector<Ref<Symbol>> GetSymbols();
+std::vector<Ref<Symbol>> GetSymbolsOfType(BNSymbolType type);
+```
+
+Returns all symbols or symbols of a specific type.
+
+## Analysis Control
+
+### Update Analysis
+
+```cpp
+void UpdateAnalysis();
+void UpdateAnalysisAndWait();
+```
+
+Trigger analysis updates. `UpdateAnalysisAndWait()` blocks until analysis completes.
+
+### Abort Analysis
+
+```cpp
+void Abort();
+```
+
+Aborts the current analysis.
+
+### Add Function
+
+```cpp
+Ref<Function> AddFunctionForAnalysis(Ref<Platform> platform, uint64_t addr);
+```
+
+Manually adds a function at the specified address for analysis.
+
+## File Metadata
+
+### Get File Metadata
+
+```cpp
+Ref<FileMetadata> GetFile() const;
+```
+
+Returns the underlying file metadata object.
+
+**Example:**
+```cpp
+Ref<FileMetadata> file = bv->GetFile();
+cout << "Filename: " << file->GetFilename() << endl;
+
+// Close the file when done
+file->Close();
+```
+
+## Custom BinaryView Subclasses
+
+You can create custom binary view types by subclassing `BinaryView`:
+
+```cpp
+class MyBinaryView : public BinaryView {
+protected:
+    MyBinaryView(FileMetadata* file, BinaryView* parent = nullptr)
+        : BinaryView("MyViewType", file, parent) {}
+
+    // Override virtual methods
+    virtual size_t PerformRead(void* dest, uint64_t offset, size_t len) override {
+        // Custom read implementation
+        return 0;
+    }
+
+    virtual size_t PerformWrite(uint64_t offset, const void* data, size_t len) override {
+        // Custom write implementation
+        return 0;
+    }
+
+    virtual bool PerformIsValidOffset(uint64_t offset) override {
+        // Custom validation
+        return false;
+    }
+
+public:
+    static Ref<BinaryView> Create(FileMetadata* file) {
+        return new MyBinaryView(file);
+    }
+};
+```
+
+## Complete Example
+
+From the [bin-info example](https://github.com/Vector35/binaryninjaapi/blob/dev/examples/bin-info/src/bin-info.cpp):
+
+```cpp
+#include "binaryninjaapi.h"
+#include <iostream>
+
+using namespace BinaryNinja;
+using namespace std;
+
+int main(int argc, char* argv[]) {
+    SetBundledPluginDirectory(GetBundledPluginDirectory());
+    InitPlugins();
+
+    Ref<BinaryView> bv = BinaryNinja::Load(argv[1]);
+    if (!bv || bv->GetTypeName() == "Raw") {
+        fprintf(stderr, "Input file does not appear to be an executable\n");
+        return -1;
+    }
+
+    cout << "TYPE:     " << bv->GetTypeName() << endl;
+    cout << "START:    0x" << hex << bv->GetStart() << endl;
+    cout << "ENTRY:    0x" << hex << bv->GetEntryPoint() << endl;
+    cout << "PLATFORM: " << bv->GetDefaultPlatform()->GetName() << endl;
+
+    // List functions
+    for (auto func : bv->GetAnalysisFunctionList()) {
+        cout << hex << func->GetStart() << " " 
+             << func->GetSymbol()->GetFullName() << endl;
+    }
+
+    // List strings
+    for (auto str_ref : bv->GetStrings()) {
+        char* str = (char*)malloc(str_ref.length + 1);
+        bv->Read(str, str_ref.start, str_ref.length);
+        str[str_ref.length] = 0;
+        cout << hex << str_ref.start << " " << str << endl;
+        free(str);
+    }
+
+    bv->GetFile()->Close();
+    BNShutdown();
+    return 0;
+}
+```
+
+## See Also
+
+- [Function Class](/api/cpp/function) - Working with functions
+- [Architecture Class](/api/cpp/architecture) - CPU architecture support
+- [Type Class](/api/cpp/types) - Type system integration

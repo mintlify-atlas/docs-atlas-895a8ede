@@ -1,0 +1,289 @@
+---
+title: Getting started with plugin development
+description: Learn how to create Binary Ninja plugins
+---
+
+Binary Ninja's plugin system allows you to extend its capabilities in powerful ways. You can create new architectures, binary format loaders, UI extensions, and workflow modifications.
+
+## Plugin types
+
+<CardGroup cols={2}>
+  <Card title="Architecture plugins" icon="microchip" href="/plugins/architecture-plugins">
+    Add support for new CPU architectures
+  </Card>
+  <Card title="Binary view plugins" icon="file-code" href="/plugins/binary-view-plugins">
+    Create custom binary format loaders
+  </Card>
+  <Card title="UI plugins" icon="window" href="/plugins/ui-plugins">
+    Extend the Binary Ninja interface
+  </Card>
+  <Card title="Workflow plugins" icon="diagram-project" href="/plugins/workflow-plugins">
+    Modify the analysis pipeline
+  </Card>
+</CardGroup>
+
+## Plugin structure
+
+Binary Ninja plugins can be written in **Python**, **C++**, or **Rust**. The basic structure is similar across all languages:
+
+<Tabs>
+  <Tab title="Python">
+    Python plugins are the easiest to create and don't require compilation.
+
+    ```python python_plugin.py
+    from binaryninja import PluginCommand
+
+    def my_plugin_function(bv):
+        """Plugin functionality goes here"""
+        print(f"Analyzing {bv.file.filename}")
+        # Your analysis code
+
+    # Register the plugin command
+    PluginCommand.register(
+        "My Plugin\\Do Analysis",
+        "Performs custom analysis",
+        my_plugin_function
+    )
+    ```
+  </Tab>
+  <Tab title="C++">
+    C++ plugins require compilation but offer maximum performance.
+
+    ```cpp plugin.cpp
+    #include "binaryninjaapi.h"
+
+    using namespace BinaryNinja;
+
+    extern "C" {
+        BN_DECLARE_CORE_ABI_VERSION
+
+        BINARYNINJAPLUGIN bool CorePluginInit() {
+            // Initialize your plugin
+            return true;
+        }
+    }
+    ```
+  </Tab>
+  <Tab title="Rust">
+    Rust plugins combine safety with performance.
+
+    ```rust lib.rs
+    use binaryninja::command::Command;
+
+    #[no_mangle]
+    pub extern "C" fn CorePluginInit() -> bool {
+        // Initialize your plugin
+        true
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Plugin installation
+
+### Plugin directories
+
+Binary Ninja loads plugins from platform-specific directories:
+
+<CodeGroup>
+```bash macOS
+~/Library/Application Support/Binary Ninja/plugins/
+```
+
+```bash Linux
+~/.binaryninja/plugins/
+```
+
+```bash Windows
+%APPDATA%\Binary Ninja\plugins\
+```
+</CodeGroup>
+
+<Note>
+  You can override the plugin directory using the `BN_USER_DIRECTORY` environment variable.
+</Note>
+
+### Installing a plugin
+
+<Steps>
+  <Step title="Copy your plugin">
+    Copy your plugin file (`.py`, `.so`, `.dylib`, or `.dll`) to the plugins directory.
+
+    For Python plugins, you can also copy an entire plugin folder.
+  </Step>
+  <Step title="Restart Binary Ninja">
+    Restart Binary Ninja to load the new plugin.
+
+    Alternatively, use **Tools → Manage Plugins** to reload plugins without restarting.
+  </Step>
+  <Step title="Verify installation">
+    Check the plugin log at:
+    - **View → Log → Plugin** in the UI
+    - Or `~/.binaryninja/plugins.log`
+  </Step>
+</Steps>
+
+## Plugin registration
+
+Plugins must register their functionality with Binary Ninja:
+
+### Command plugins
+
+The simplest plugin type adds menu commands:
+
+```python
+from binaryninja import PluginCommand
+
+def analyze_strings(bv):
+    for string in bv.strings:
+        if "password" in string.value.lower():
+            print(f"Found password string at {hex(string.start)}")
+
+PluginCommand.register(
+    "String Analysis\\Find Passwords",
+    "Finds potential password strings",
+    analyze_strings
+)
+```
+
+### Background plugins
+
+For long-running operations, use background tasks:
+
+```python
+from binaryninja import BackgroundTaskThread, PluginCommand
+
+class AnalysisTask(BackgroundTaskThread):
+    def __init__(self, bv):
+        BackgroundTaskThread.__init__(self, "Running analysis", True)
+        self.bv = bv
+
+    def run(self):
+        # Long-running analysis
+        total = len(self.bv.functions)
+        for i, func in enumerate(self.bv.functions):
+            self.progress = f"Analyzing function {i+1}/{total}"
+            # Do work...
+
+def start_analysis(bv):
+    task = AnalysisTask(bv)
+    task.start()
+
+PluginCommand.register(
+    "Background\\Start Analysis",
+    "Runs analysis in background",
+    start_analysis
+)
+```
+
+## Plugin configuration
+
+### Settings
+
+Plugins can register custom settings:
+
+```python
+from binaryninja import Settings
+
+Settings().register_group("myplugin", "My Plugin")
+Settings().register_setting(
+    "myplugin.enabled",
+    '{"title": "Enable Analysis", "type": "boolean", "default": true}'
+)
+
+# Access settings
+if Settings().get_bool("myplugin.enabled"):
+    # Do something
+    pass
+```
+
+### Metadata
+
+Store plugin-specific data in the binary view:
+
+```python
+from binaryninja import Metadata
+
+# Store metadata
+bv.store_metadata("myplugin.analysis_results", {"count": 42})
+
+# Retrieve metadata
+if bv.query_metadata("myplugin.analysis_results"):
+    results = bv.query_metadata("myplugin.analysis_results")
+```
+
+## Debugging plugins
+
+### Logging
+
+Use Binary Ninja's logging system:
+
+```python
+from binaryninja import log_info, log_warn, log_error
+
+log_info("Plugin initialized")
+log_warn("Potential issue detected")
+log_error("Failed to analyze function")
+```
+
+### Python console
+
+For Python plugins, use the integrated console:
+1. Open **View → Console**
+2. Test your plugin functions interactively
+3. Access `current_view` and `current_function` variables
+
+### Debugging tips
+
+<AccordionGroup>
+  <Accordion title="Reload plugins without restarting">
+    Use **Tools → Manage Plugins → Reload** to reload Python plugins.
+
+    For C++/Rust plugins, you must restart Binary Ninja.
+  </Accordion>
+
+  <Accordion title="Check plugin compatibility">
+    Verify your plugin's `api_REVISION.txt` matches your Binary Ninja installation:
+
+    ```bash
+    cat "$BN_INSTALL_DIR/api_REVISION.txt"
+    ```
+  </Accordion>
+
+  <Accordion title="Enable debug logging">
+    Set the log level in **Edit → Preferences → Settings**:
+
+    ```json
+    "core.log.minLevel": "DebugLog"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Example plugins
+
+Binary Ninja includes many example plugins in the API repository:
+
+- **Python examples**: [`python/examples/`](https://github.com/Vector35/binaryninja-api/tree/dev/python/examples)
+- **C++ examples**: [`examples/`](https://github.com/Vector35/binaryninja-api/tree/dev/examples)
+- **Rust examples**: [`rust/plugin_examples/`](https://github.com/Vector35/binaryninja-api/tree/dev/rust/plugin_examples)
+
+<Note>
+  Many production plugins are open source. Search GitHub for `binaryninja-plugin` to find examples.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture plugins" href="/plugins/architecture-plugins">
+    Add CPU architecture support
+  </Card>
+  <Card title="Binary view plugins" href="/plugins/binary-view-plugins">
+    Create format loaders
+  </Card>
+  <Card title="UI plugins" href="/plugins/ui-plugins">
+    Extend the interface
+  </Card>
+  <Card title="Workflow plugins" href="/plugins/workflow-plugins">
+    Modify analysis pipeline
+  </Card>
+</CardGroup>

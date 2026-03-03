@@ -1,0 +1,561 @@
+---
+title: Types
+description: Understanding Binary Ninja's type system and type analysis
+---
+
+## Overview
+
+Binary Ninja's **type system** provides rich support for representing, parsing, and applying type information to binaries. The type system includes built-in types, structures, enumerations, function signatures, and supports importing type libraries.
+
+<Info>
+Types are essential for accurate decompilation and analysis. Binary Ninja can import types from debug info (DWARF, PDB), type libraries, or you can define them manually.
+</Info>
+
+## Type Classes
+
+Binary Ninja supports these fundamental type classes:
+
+- **Void** - `void`
+- **Bool** - Boolean values
+- **Integer** - Signed and unsigned integers
+- **Float** - Floating point numbers
+- **Pointer** - Pointer types
+- **Array** - Fixed-size arrays
+- **Function** - Function pointers/signatures
+- **Structure** - Structures and unions
+- **Enumeration** - Named enumeration values
+- **Named Type Reference** - References to defined types
+
+```python
+from binaryninja.enums import TypeClass
+
+# Check type class
+if my_type.type_class == TypeClass.IntegerTypeClass:
+    print("Integer type")
+elif my_type.type_class == TypeClass.PointerTypeClass:
+    print("Pointer type")
+```
+
+## Creating Types
+
+### Basic Types
+
+```python
+from binaryninja import Type
+
+# Void
+void_type = Type.void()
+
+# Boolean
+bool_type = Type.bool()
+
+# Integers
+int8 = Type.int(1, sign=True)        # signed char / int8_t
+uint8 = Type.int(1, sign=False)       # unsigned char / uint8_t
+int16 = Type.int(2, sign=True)        # short / int16_t
+int32 = Type.int(4, sign=True)        # int / int32_t
+int64 = Type.int(8, sign=True)        # long long / int64_t
+
+# Floating point
+float_type = Type.float(4)            # float
+double_type = Type.float(8)           # double
+
+# Character types (convenience methods)
+char_type = Type.char()
+wchar_type = Type.wide_char(2)
+```
+
+### Pointer Types
+
+```python
+from binaryninja import Type, Architecture
+
+arch = Architecture['x86_64']
+
+# Pointer to int
+int_ptr = Type.pointer(arch, Type.int(4))
+
+# Pointer to pointer (int**)
+int_ptr_ptr = Type.pointer(arch, int_ptr)
+
+# Void pointer (void*)
+void_ptr = Type.pointer(arch, Type.void())
+
+# Const pointer
+const_int_ptr = Type.pointer(arch, Type.int(4), const=True)
+
+# Check if type is a pointer
+if my_type.type_class == TypeClass.PointerTypeClass:
+    target = my_type.target
+    print(f"Pointer to: {target}")
+```
+
+### Array Types
+
+```python
+# Fixed-size array
+int_array = Type.array(Type.int(4), 10)  # int[10]
+
+# Multi-dimensional array
+matrix = Type.array(Type.array(Type.int(4), 5), 3)  # int[3][5]
+
+# Get array element type and count
+if my_type.type_class == TypeClass.ArrayTypeClass:
+    element_type = my_type.element_type
+    count = my_type.count
+    print(f"Array of {count} x {element_type}")
+```
+
+## Structures and Unions
+
+### Creating Structures
+
+```python
+from binaryninja import Structure, StructureVariant, Type
+
+# Create structure
+struct = Structure()
+
+# Add members
+struct.append(Type.int(4), "field1")
+struct.append(Type.pointer(arch, Type.char()), "field2") 
+struct.append(Type.array(Type.char(), 16), "field3")
+
+# Insert at specific offset
+struct.insert(8, Type.int(4), "inserted_field")
+
+# Replace member
+struct.replace(0, Type.int(8), "new_field1")
+
+# Create type from structure
+struct_type = Type.structure_type(struct)
+
+# Get structure info
+print(f"Size: {struct.width} bytes")
+print(f"Members: {len(struct.members)}")
+
+for member in struct.members:
+    print(f"  0x{member.offset:x}: {member.type} {member.name}")
+```
+
+### Creating Unions
+
+```python
+# Create union (same API as structure)
+union = Structure()
+union.type = StructureVariant.UnionStructureType
+
+# Add members (all at offset 0)
+union.append(Type.int(4), "as_int")
+union.append(Type.float(4), "as_float")
+union.append(Type.array(Type.char(), 4), "as_bytes")
+
+union_type = Type.structure_type(union)
+```
+
+### Named Structure Types
+
+```python
+# Define named structure in BinaryView
+struct = Structure()
+struct.append(Type.int(4), "x")
+struct.append(Type.int(4), "y")
+
+bv.define_user_type("Point", Type.structure_type(struct))
+
+# Use named type
+point_type = Type.named_type_from_type("Point", Type.structure_type(struct))
+point_ptr = Type.pointer(arch, point_type)
+```
+
+## Enumerations
+
+### Creating Enumerations
+
+```python
+from binaryninja import Enumeration, Type
+
+# Create enumeration
+enum = Enumeration()
+
+# Add members
+enum.append("OPTION_A", 0)
+enum.append("OPTION_B", 1)
+enum.append("OPTION_C", 2)
+
+# Create type from enumeration
+enum_type = Type.enumeration_type(arch, enum)
+
+# Access members
+for member in enum.members:
+    print(f"{member.name} = {member.value}")
+```
+
+### Named Enumerations
+
+```python
+# Define named enumeration
+enum = Enumeration()
+enum.append("SUCCESS", 0)
+enum.append("ERROR_INVALID", 1)
+enum.append("ERROR_TIMEOUT", 2)
+
+bv.define_user_type("ErrorCode", Type.enumeration_type(arch, enum))
+
+# Use the enumeration
+error_code_type = bv.get_type_by_name("ErrorCode")
+```
+
+## Function Types
+
+### Creating Function Signatures
+
+```python
+from binaryninja import Type, FunctionParameter
+
+# Method 1: Simple function type
+return_type = Type.int(4)
+param_types = [Type.pointer(arch, Type.char()), Type.int(4)]
+func_type = Type.function(return_type, param_types)
+
+# Method 2: With parameter names
+params = [
+    FunctionParameter(Type.pointer(arch, Type.char()), "str"),
+    FunctionParameter(Type.int(4), "len")
+]
+func_type = Type.function(return_type, params)
+
+# Set calling convention
+cc = arch.calling_conventions['sysv']
+func_type_with_cc = Type.function(return_type, params, 
+                                   calling_convention=cc)
+
+# Variadic function (like printf)
+printf_params = [FunctionParameter(Type.pointer(arch, Type.char()), "format")]
+printf_type = Type.function(Type.int(4), printf_params, variable_arguments=True)
+```
+
+### Applying Function Types
+
+```python
+# Apply type to function
+func = bv.get_function_at(0x401000)
+
+# Method 1: Parse type string
+type_str = "int (char* str, int len)"
+func_type, name = bv.parse_type_string(type_str)
+func.type = func_type
+
+# Method 2: Construct type
+return_type = Type.int(4)
+params = [
+    FunctionParameter(Type.pointer(arch, Type.char()), "buffer"),
+    FunctionParameter(Type.int(4), "size")
+]
+func.type = Type.function(return_type, params)
+```
+
+## Parsing Type Strings
+
+### Parse Type Definitions
+
+```python
+# Parse simple type
+type_obj, name = bv.parse_type_string("int*")
+
+# Parse structure definition
+struct_str = """
+struct MyStruct {
+    int field1;
+    char* field2;
+    char buffer[256];
+};
+"""
+type_obj, name = bv.parse_type_string(struct_str)
+if name:
+    bv.define_user_type(name, type_obj)
+
+# Parse function signature
+func_str = "int MyFunction(void* data, size_t len)"
+func_type, func_name = bv.parse_type_string(func_str)
+
+# Parse with platform-specific types
+type_str = "DWORD (LPCSTR lpString, DWORD dwLen)"  # Windows types
+func_type, name = bv.parse_type_string(type_str)
+```
+
+### Parse Multiple Definitions
+
+```python
+# Parse multiple type definitions
+type_str = """
+typedef struct {
+    int x;
+    int y;
+} Point;
+
+typedef struct {
+    Point origin;
+    int width;
+    int height;
+} Rectangle;
+"""
+
+result = bv.parse_types_from_string(type_str)
+for name, type_obj in result.types.items():
+    bv.define_user_type(name, type_obj)
+```
+
+## Type Libraries
+
+### Using Type Libraries
+
+```python
+from binaryninja import typelibrary
+
+# Get platform type library
+type_lib = bv.platform.type_libraries
+for lib in type_lib:
+    print(f"Type library: {lib.name}")
+
+# Import type from library
+type_obj = bv.import_library_type("FILE")  # libc
+if type_obj:
+    print(f"Imported: {type_obj}")
+
+# Import function from library
+func_type = bv.import_library_object("printf")
+if func_type:
+    print(f"printf signature: {func_type}")
+```
+
+## Working with Types
+
+### Getting Type Information
+
+```python
+# Get type properties
+print(f"Type class: {my_type.type_class}")
+print(f"Width: {my_type.width} bytes")
+print(f"Alignment: {my_type.alignment}")
+print(f"Signed: {my_type.signed}")
+print(f"Const: {my_type.const}")
+print(f"Volatile: {my_type.volatile}")
+
+# Type string representation
+print(f"Type: {my_type}")
+print(f"Type string: {str(my_type)}")
+```
+
+### Type Comparison
+
+```python
+# Compare types
+if type1 == type2:
+    print("Types are equal")
+
+# Get mutable copy for modification
+mutable_type = type1.mutable_copy()
+```
+
+### Accessing Defined Types
+
+```python
+# Get all defined types
+for name in bv.types:
+    type_obj = bv.types[name]
+    print(f"{name}: {type_obj}")
+
+# Get specific type by name
+my_struct = bv.get_type_by_name("MyStruct")
+
+# Get type by ID
+type_id = "..."
+type_obj = bv.get_type_by_id(type_id)
+```
+
+## Data Variables
+
+Data variables associate types with addresses:
+
+```python
+# Define data variable with type
+addr = 0x404000
+int_type = Type.int(4)
+bv.define_user_data_var(addr, int_type)
+
+# Get data variable
+data_var = bv.get_data_var_at(addr)
+if data_var:
+    print(f"Type: {data_var.type}")
+    print(f"Address: 0x{data_var.address:x}")
+    print(f"Name: {data_var.name}")
+
+# Set data variable name
+bv.define_user_symbol(Symbol(SymbolType.DataSymbol, addr, "g_counter"))
+```
+
+## Qualified Names
+
+```python
+from binaryninja import QualifiedName
+
+# Create qualified name
+qname = QualifiedName(["std", "vector", "iterator"])
+print(str(qname))  # "std::vector::iterator"
+
+# Use in type definitions
+bv.define_user_type(qname, my_type)
+
+# Get type with qualified name
+type_obj = bv.get_type_by_name(qname)
+```
+
+## Practical Examples
+
+### Example 1: Defining a Complex Structure
+
+```python
+def define_linked_list(bv, arch):
+    """Define a linked list structure"""
+    
+    # Create Node structure
+    node = Structure()
+    
+    # Add data field
+    node.append(Type.int(4), "data")
+    
+    # Add next pointer (forward reference)
+    # We'll use a void* for now
+    node.append(Type.pointer(arch, Type.void()), "next")
+    
+    # Define the type
+    node_type = Type.structure_type(node)
+    bv.define_user_type("Node", node_type)
+    
+    # Now fix the next pointer to be Node*
+    node_named_type = Type.named_type_from_type("Node", node_type)
+    node.replace(1, Type.pointer(arch, node_named_type), "next")
+    
+    # Update the definition
+    bv.define_user_type("Node", Type.structure_type(node))
+    
+    print(f"Defined Node structure ({node.width} bytes):")
+    for member in node.members:
+        print(f"  +0x{member.offset:x}: {member.type} {member.name}")
+
+bv = load("/path/to/binary")
+define_linked_list(bv, bv.arch)
+```
+
+### Example 2: Importing and Applying Types
+
+```python
+def apply_types_from_header(bv, header_path):
+    """Parse C header and apply types"""
+    
+    # Read header file
+    with open(header_path, 'r') as f:
+        header_content = f.read()
+    
+    # Parse types
+    result = bv.parse_types_from_string(header_content)
+    
+    # Import all types
+    for name, type_obj in result.types.items():
+        bv.define_user_type(name, type_obj)
+        print(f"Defined type: {name}")
+    
+    # Import all variables
+    for name, var_obj in result.variables.items():
+        print(f"Variable: {name} - {var_obj}")
+    
+    # Import all functions  
+    for name, func_obj in result.functions.items():
+        print(f"Function: {name} - {func_obj}")
+
+apply_types_from_header(bv, "structs.h")
+```
+
+### Example 3: Type-Aware Data Analysis
+
+```python
+def analyze_struct_references(bv, struct_name):
+    """Find all references to a structure type"""
+    
+    # Get the structure type
+    struct_type = bv.get_type_by_name(struct_name)
+    if not struct_type:
+        print(f"Type '{struct_name}' not found")
+        return
+    
+    print(f"\nAnalyzing references to '{struct_name}':")
+    
+    # Find data variables of this type
+    for addr, data_var in bv.data_vars.items():
+        if data_var.type == struct_type:
+            print(f"\nData variable at 0x{addr:x}:")
+            
+            # Get cross-references
+            refs = bv.get_code_refs(addr)
+            for ref in refs:
+                if ref.function:
+                    print(f"  Referenced by {ref.function.name} "
+                          f"at 0x{ref.address:x}")
+    
+    # Find function parameters/returns
+    for func in bv.functions:
+        if func.type:
+            # Check return type
+            if func.type.return_value == struct_type:
+                print(f"\n{func.name} returns {struct_name}")
+            
+            # Check parameters
+            for param in func.type.parameters:
+                if param.type == struct_type:
+                    print(f"\n{func.name} has {struct_name} parameter: "
+                          f"{param.name}")
+
+bv = load("/path/to/binary")
+analyze_struct_references(bv, "MyStruct")
+```
+
+### Example 4: Creating Type Library
+
+```python
+def create_type_library(name, arch_name, types_dict):
+    """Create a custom type library"""
+    from binaryninja import typelibrary, Architecture
+    
+    arch = Architecture[arch_name]
+    
+    # Create type library
+    lib = typelibrary.TypeLibrary.new(arch, name)
+    
+    # Add types
+    for type_name, type_obj in types_dict.items():
+        lib.add_named_type(type_name, type_obj)
+    
+    # Save to file
+    lib.write_to_file(f"{name}.bntl")
+    print(f"Created type library: {name}.bntl")
+
+# Example usage
+types = {
+    "Point": Type.structure_type(Structure().append(Type.int(4), "x")
+                                             .append(Type.int(4), "y")),
+    "Color": Type.enumeration_type(arch, Enumeration()
+                                   .append("RED", 0)
+                                   .append("GREEN", 1)
+                                   .append("BLUE", 2))
+}
+
+create_type_library("MyTypes", "x86_64", types)
+```
+
+## Related Concepts
+
+- [Functions](./functions) - Function signatures and analysis
+- [Symbols](./symbols) - Symbol names and bindings
+- [Binary Views](./binary-views) - Defining types in context
+- [Intermediate Languages](./intermediate-languages) - Type propagation through IL

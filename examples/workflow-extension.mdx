@@ -1,0 +1,512 @@
+---
+title: Workflow Extension
+description: Learn how to create custom workflow activities to extend Binary Ninja's analysis pipeline
+---
+
+This example demonstrates how to create custom workflow activities that integrate into Binary Ninja's analysis pipeline, using a function inliner as a practical example.
+
+## Overview
+
+The `inliner.cpp` example shows how to:
+- Create custom workflow activities
+- Clone and modify existing workflows
+- Integrate activities into the analysis pipeline
+- Use LLIL manipulation for code transformation
+- Register plugin commands that interact with workflows
+
+## Complete Source Code
+
+```cpp
+#include <cinttypes>
+#include <cstdint>
+#include <cstdio>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+
+#include "binaryninjaapi.h"
+#include "lowlevelilinstruction.h"
+#include "mediumlevelilinstruction.h"
+
+using namespace BinaryNinja;
+using namespace std;
+
+extern "C"
+{
+    BN_DECLARE_CORE_ABI_VERSION
+
+    std::mutex g_mutex;
+    unordered_map<void*, unordered_map<uint64_t, set<uint64_t>>> g_callSiteInlines;
+
+    void FunctionInliner(Ref<AnalysisContext> analysisContext)
+    {
+        std::unique_lock<std::mutex> lock(g_mutex);
+
+        Ref<Function> function = analysisContext->GetFunction();
+        Ref<BinaryView> data = function->GetView();
+        auto gItr = g_callSiteInlines.find(data->GetObject());
+        if (gItr == g_callSiteInlines.end())
+            return;
+
+        auto itr = gItr->second.find(function->GetStart());
+        if (itr == gItr->second.end())
+            return;
+
+        auto& callSiteInlines = itr->second;
+        lock.unlock();
+
+        bool updated = false;
+        uint8_t opcode[BN_MAX_INSTRUCTION_LENGTH];
+        InstructionInfo iInfo;
+        Ref<LowLevelILFunction> llilFunc = analysisContext->GetLowLevelILFunction();
+        
+        for (const auto inlineAddr : callSiteInlines)
+        {
+            for (auto& i : llilFunc->GetBasicBlocks())
+            {
+                Ref<Architecture> arch = i->GetArchitecture();
+                for (size_t instrIndex = i->GetStart(); instrIndex < i->GetEnd(); instrIndex++)
+                {
+                    LowLevelILInstruction instr = llilFunc->GetInstruction(instrIndex);
+
+                    if (instr.address != inlineAddr)
+                        continue;
+
+                    if (instr.operation != LLIL_CALL)
+                    {
+                        LogWarn("Failed to inline function at: 0x%" PRIx64 ". Mapping to LLIL_CALL Failed!", 
+                            instr.address);
+                        continue;
+                    }
+
+                    // Get call destination
+                    uint64_t platformAddr;
+                    LowLevelILInstruction destExpr = instr.GetDestExpr<LLIL_CALL>();
+                    RegisterValue target = destExpr.GetValue();
+                    if (target.IsConstant())
+                        platformAddr = target.value;
+                    else
+                    {
+                        LogWarn("Failed to inline function at: 0x%" PRIx64 ". Destination not Constant!", 
+                            instr.address);
+                        continue;
+                    }
+
+                    // Get target function and inline its IL
+                    Ref<Function> targetFunc = data->GetAnalysisFunction(
+                        function->GetPlatform(), platformAddr);
+                    auto targetLlil = targetFunc->GetLowLevelIL();
+                    
+                    LowLevelILLabel inlineStartLabel;
+                    llilFunc->MarkLabel(inlineStartLabel);
+                    instr.Replace(llilFunc->Goto(inlineStartLabel));
+
+                    // Copy target function's IL
+                    llilFunc->PrepareToCopyFunction(targetLlil);
+                    for (auto& ti : targetLlil->GetBasicBlocks())
+                    {
+                        llilFunc->PrepareToCopyBlock(ti);
+                        for (size_t tinstrIndex = ti->GetStart(); tinstrIndex < ti->GetEnd(); tinstrIndex++)
+                        {
+                            LowLevelILInstruction tinstr = targetLlil->GetInstruction(tinstrIndex);
+                            if (tinstr.operation == LLIL_RET)
+                            {
+                                // Replace return with goto to next instruction
+                                LowLevelILLabel label;
+                                label.operand = instrIndex + 1;
+                                llilFunc->AddInstruction(llilFunc->Goto(label));
+                            }
+                            else
+                                llilFunc->AddInstruction(tinstr.CopyTo(llilFunc));
+                        }
+                    }
+                    llilFunc->Finalize();
+
+                    updated = true;
+                    break;
+                }
+            }
+        }
+
+        if (!updated)
+            return;
+
+        // Regenerate SSA form after modifications
+        llilFunc->GenerateSSAForm();
+    }
+
+    BINARYNINJAPLUGIN bool CorePluginInit()
+    {
+        auto inlinerIsValid = [](BinaryView* view, Function* func) {
+            if (auto workflow = func->GetWorkflow(); workflow)
+                return workflow->Contains("extension.functionInliner");
+            return false;
+        };
+
+        PluginCommand::RegisterForFunction(
+            "Optimizer\\Inline Function at Current Call Site", 
+            "Inline function call at current call site.",
+            [](BinaryView* view, Function* func) {
+                std::lock_guard<std::mutex> lock(g_mutex);
+                g_callSiteInlines[view->GetObject()][func->GetStart()].insert(view->GetCurrentOffset());
+                func->Reanalyze();
+            },
+            inlinerIsValid);
+
+        // Create custom workflow
+        Ref<Workflow> inlinerWorkflow = Workflow::Get("core.function.baseAnalysis")->Clone("InlinerWorkflow");
+        inlinerWorkflow->RegisterActivity(new Activity("extension.functionInliner", &FunctionInliner));
+        inlinerWorkflow->Insert("core.function.translateTailCalls", "extension.functionInliner");
+        
+        Workflow::RegisterWorkflow(inlinerWorkflow,
+            R"#({
+            "title" : "Function Inliner (Example)",
+            "description" : "This analysis demonstrates Binary Ninja's extensible analysis APIs.",
+            "targetType" : "function"
+            })#");
+
+        return true;
+    }
+}
+```
+
+## Key Concepts Explained
+
+<Steps>
+
+### Define an Activity Function
+
+```cpp
+void FunctionInliner(Ref<AnalysisContext> analysisContext)
+{
+    Ref<Function> function = analysisContext->GetFunction();
+    Ref<LowLevelILFunction> llilFunc = analysisContext->GetLowLevelILFunction();
+    
+    // Perform custom analysis or transformations
+    // ...
+}
+```
+
+Workflow activities are functions that:
+- Take an `AnalysisContext` parameter
+- Access function and IL through the context
+- Perform analysis or transformations
+- Are called automatically during analysis
+
+### Clone an Existing Workflow
+
+```cpp
+Ref<Workflow> inlinerWorkflow = Workflow::Get("core.function.baseAnalysis")->Clone("InlinerWorkflow");
+```
+
+Start with a built-in workflow:
+- `Workflow::Get(name)` - Retrieve existing workflow
+- `->Clone(newName)` - Create a customizable copy
+- Clone preserves all existing activities
+
+Common base workflows:
+- `"core.function.baseAnalysis"` - Standard function analysis
+- `"core.module.defaultAnalysis"` - Binary-level analysis
+
+### Register a Custom Activity
+
+```cpp
+inlinerWorkflow->RegisterActivity(new Activity("extension.functionInliner", &FunctionInliner));
+```
+
+Create and register activities:
+- First parameter: Unique activity identifier
+- Second parameter: Function pointer to activity implementation
+- Use namespaced names (e.g., `"extension.*"`) for custom activities
+
+### Insert Activity into Pipeline
+
+```cpp
+inlinerWorkflow->Insert("core.function.translateTailCalls", "extension.functionInliner");
+```
+
+Control activity execution order:
+- `Insert(beforeActivity, newActivity)` - Run before specified activity
+- Activities run in the order they appear in the workflow
+- Choose insertion point based on data dependencies
+
+Common insertion points:
+- Before `"core.function.translateTailCalls"` - After basic LLIL construction
+- After `"core.function.generateSSA"` - When SSA form is available
+
+### Register the Workflow
+
+```cpp
+Workflow::RegisterWorkflow(inlinerWorkflow,
+    R"#({
+    "title" : "Function Inliner (Example)",
+    "description" : "This analysis demonstrates Binary Ninja's extensible analysis APIs.",
+    "targetType" : "function"
+    })#");
+```
+
+Make the workflow available:
+- JSON metadata describes the workflow
+- `targetType` can be `"function"` or `"module"`
+- Users can select the workflow when analyzing binaries
+
+### Modify LLIL During Analysis
+
+```cpp
+// Replace call instruction with goto
+instr.Replace(llilFunc->Goto(inlineStartLabel));
+
+// Copy IL from another function
+llilFunc->PrepareToCopyFunction(targetLlil);
+for (auto& block : targetLlil->GetBasicBlocks())
+{
+    llilFunc->PrepareToCopyBlock(block);
+    for (size_t i = block->GetStart(); i < block->GetEnd(); i++)
+    {
+        LowLevelILInstruction tinstr = targetLlil->GetInstruction(i);
+        llilFunc->AddInstruction(tinstr.CopyTo(llilFunc));
+    }
+}
+llilFunc->Finalize();
+```
+
+IL modification workflow:
+1. `PrepareToCopyFunction()` - Initialize for copying from another function
+2. `PrepareToCopyBlock()` - Prepare to copy a block
+3. `AddInstruction()` - Add copied or new instructions
+4. `Finalize()` - Complete IL construction
+5. `GenerateSSAForm()` - Regenerate SSA if needed
+
+### Create Workflow-Aware Plugin Commands
+
+```cpp
+auto inlinerIsValid = [](BinaryView* view, Function* func) {
+    if (auto workflow = func->GetWorkflow(); workflow)
+        return workflow->Contains("extension.functionInliner");
+    return false;
+};
+
+PluginCommand::RegisterForFunction(
+    "Optimizer\\Inline Function at Current Call Site",
+    "Inline function call at current call site.",
+    [](BinaryView* view, Function* func) {
+        // Mark function for inlining
+        func->Reanalyze();
+    },
+    inlinerIsValid  // Only show command for functions using this workflow
+);
+```
+
+Commands can check if a workflow is active:
+- `func->GetWorkflow()` - Get function's workflow
+- `workflow->Contains(activityName)` - Check if activity is present
+- Use as validation callback to show/hide commands
+
+</Steps>
+
+## Workflow Architecture
+
+### Activity Lifecycle
+
+```
+1. Binary opened with workflow selected
+   ↓
+2. Analysis begins
+   ↓
+3. Activities run in registered order
+   ↓
+4. Each activity receives AnalysisContext
+   ↓
+5. Activity performs transformations
+   ↓
+6. Next activity in pipeline runs
+   ↓
+7. Analysis completes
+```
+
+### Common Activity Patterns
+
+#### Data Collection Activity
+
+```cpp
+void CollectStatistics(Ref<AnalysisContext> ctx)
+{
+    Ref<Function> func = ctx->GetFunction();
+    
+    // Collect metrics
+    size_t instructionCount = 0;
+    for (auto& block : func->GetBasicBlocks())
+        instructionCount += block->GetLength();
+    
+    // Store in function metadata or global state
+    LogInfo("Function %s: %zu instructions", 
+        func->GetSymbol()->GetFullName().c_str(), instructionCount);
+}
+```
+
+#### IL Transformation Activity
+
+```cpp
+void SimplifyExpressions(Ref<AnalysisContext> ctx)
+{
+    Ref<LowLevelILFunction> il = ctx->GetLowLevelILFunction();
+    
+    bool modified = false;
+    // Find and simplify patterns
+    for (auto& block : il->GetBasicBlocks())
+    {
+        for (size_t i = block->GetStart(); i < block->GetEnd(); i++)
+        {
+            auto instr = il->GetInstruction(i);
+            // Identify and transform patterns
+            if (/* pattern match */)
+            {
+                // Transform instruction
+                modified = true;
+            }
+        }
+    }
+    
+    if (modified)
+        il->GenerateSSAForm();
+}
+```
+
+#### Type Inference Activity
+
+```cpp
+void InferTypes(Ref<AnalysisContext> ctx)
+{
+    Ref<Function> func = ctx->GetFunction();
+    Ref<MediumLevelILFunction> mlil = func->GetMediumLevelIL();
+    
+    // Analyze variable usage and infer types
+    for (auto& var : func->GetVariables())
+    {
+        // Analyze how variable is used
+        Confidence<Ref<Type>> inferredType = /* type inference logic */;
+        func->CreateUserVariable(var, inferredType, var.name);
+    }
+}
+```
+
+## Building Workflow Plugins
+
+### CMake Configuration
+
+```cmake
+cmake_minimum_required(VERSION 3.13 FATAL_ERROR)
+project(WorkflowPlugin)
+
+find_package(BinaryNinja REQUIRED)
+
+add_library(WorkflowPlugin SHARED
+    inliner.cpp
+)
+
+target_link_libraries(WorkflowPlugin BinaryNinja::API)
+bn_install_plugin(${PROJECT_NAME})
+```
+
+### Building
+
+```bash
+cd ~/workspace/source/examples/workflows/inliner
+mkdir build && cd build
+cmake ..
+make
+```
+
+## Using Custom Workflows
+
+### Select Workflow When Opening Binary
+
+1. Open binary in Binary Ninja
+2. In analysis options, select "InlinerWorkflow"
+3. Analysis runs with custom activity included
+
+### Apply to Existing Function
+
+```python
+import binaryninja as bn
+
+bv = bn.load("/path/to/binary")
+func = bv.get_function_at(0x401000)
+
+# Change function's workflow
+workflow = bn.Workflow.get("InlinerWorkflow")
+func.set_user_workflow(workflow)
+func.reanalyze()
+```
+
+### Set as Default Workflow
+
+```python
+import binaryninja as bn
+
+# Set default workflow for all new analysis
+bn.Settings().set_string("analysis.workflows.functionWorkflow", "InlinerWorkflow")
+```
+
+## Expected Output
+
+When using the inliner workflow:
+
+1. Open binary with "InlinerWorkflow" selected
+2. Plugin command "Optimizer > Inline Function at Current Call Site" appears
+3. Position cursor at a function call
+4. Run the command
+5. Function re-analyzes with call site inlined
+6. Decompilation shows inlined code instead of call
+
+## Advanced Workflow Concepts
+
+### Activity Configuration
+
+```cpp
+class ConfigurableActivity : public Activity
+{
+public:
+    ConfigurableActivity() : Activity("extension.configurable", 
+        [](AnalysisContext* ctx) {
+            // Activity logic with settings
+            SettingsRef settings = Settings::Instance();
+            bool enabled = settings->Get<bool>("myPlugin.enableFeature");
+            if (enabled)
+            {
+                // Perform analysis
+            }
+        })
+    {}
+};
+```
+
+### Conditional Activity Execution
+
+```cpp
+void ConditionalActivity(Ref<AnalysisContext> ctx)
+{
+    Ref<Function> func = ctx->GetFunction();
+    
+    // Only process functions matching criteria
+    if (func->GetParameterVariables().size() < 3)
+        return;  // Skip this function
+    
+    // Perform analysis
+}
+```
+
+## Use Cases
+
+- **Custom Optimizations** - Implement compiler-style optimizations
+- **Deobfuscation** - Remove obfuscation during analysis
+- **Pattern Recognition** - Identify code patterns automatically
+- **Type Recovery** - Advanced type inference
+- **Security Analysis** - Detect vulnerabilities during analysis
+- **Code Metrics** - Collect complexity metrics
+
+## Related Examples
+
+- [IL Parsing](/examples/il-parsing) - Understanding IL manipulation
+- [Custom IL Visitor](/examples/custom-il-visitor) - IL traversal patterns
+- [Headless Automation](/examples/headless-automation) - Automated analysis

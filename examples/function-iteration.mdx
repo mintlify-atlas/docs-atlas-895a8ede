@@ -1,0 +1,238 @@
+---
+title: Function and Instruction Iteration
+description: Learn how to iterate through functions, basic blocks, and instructions using Binary Ninja's API
+---
+
+This example demonstrates how to iterate through all functions in a binary, their basic blocks, and both Low Level IL and machine code instructions.
+
+## Overview
+
+The `instruction_iterator.py` example shows how to:
+- Iterate through all functions in a binary
+- Navigate function basic blocks
+- Access Low Level IL (LLIL) instructions
+- Access machine code instructions
+- Use proper logging for analysis output
+
+## Complete Source Code
+
+```python
+#!/usr/bin/env python
+import sys
+from binaryninja.log import log_info, log_to_stdout
+from binaryninja import load, BinaryView
+from binaryninja import PluginCommand, LogLevel
+
+
+def iterate(bv: BinaryView):
+    log_info("-------- %s --------" % bv.file.filename)
+    log_info("START: 0x%x" % bv.start)
+    log_info("ENTRY: 0x%x" % bv.entry_point)
+    log_info("ARCH: %s" % bv.arch.name)
+    log_info("\n-------- Function List --------")
+    
+    # Print all the functions, their basic blocks, and their IL instructions
+    for func in bv.functions:
+        log_info(repr(func))
+        for block in func.low_level_il:
+            log_info("\t{0}".format(block))
+
+            for insn in block:
+                log_info("\t\t{0}".format(insn))
+    
+    # Print all the functions, their basic blocks, and their machine code instructions
+    for func in bv.functions:
+        log_info(repr(func))
+        for block in func:
+            log_info("\t{0}".format(block))
+
+            for insn in block:
+                log_info("\t\t{0}".format(insn))
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        target = sys.argv[1]
+        log_to_stdout(LogLevel.WarningLog)
+        with load(target) as bv:
+            log_to_stdout(LogLevel.InfoLog)
+            iterate(bv)
+    else:
+        print(f"{sys.argv[0]} <filename>")
+else:
+    PluginCommand.register("Instruction Iterator", "Iterates Instruction to the log window", iterate)
+```
+
+## Key Concepts Explained
+
+<Steps>
+
+### Iterate All Functions
+
+```python
+for func in bv.functions:
+    log_info(repr(func))
+```
+
+The `bv.functions` property returns an iterable of all functions discovered during analysis. Use `repr(func)` to get a detailed string representation including the function's address and name.
+
+### Access Low Level IL Blocks and Instructions
+
+```python
+for block in func.low_level_il:
+    log_info("\t{0}".format(block))
+    
+    for insn in block:
+        log_info("\t\t{0}".format(insn))
+```
+
+Low Level IL (LLIL) is Binary Ninja's first intermediate representation:
+- `func.low_level_il` - Returns the LLIL function object
+- Iterate blocks in the IL control flow graph
+- Each block contains IL instructions that can be further iterated
+
+### Access Machine Code Instructions
+
+```python
+for block in func:
+    log_info("\t{0}".format(block))
+    
+    for insn in block:
+        log_info("\t\t{0}".format(insn))
+```
+
+Iterate directly over function objects to access raw disassembly:
+- `func` is iterable and yields basic blocks
+- Each block yields machine code instructions
+- Instructions are architecture-specific disassembly
+
+### Configure Logging
+
+```python
+log_to_stdout(LogLevel.InfoLog)
+```
+
+Control logging output levels:
+- `LogLevel.DebugLog` - Verbose debugging information
+- `LogLevel.InfoLog` - General information
+- `LogLevel.WarningLog` - Warnings only
+- `LogLevel.ErrorLog` - Errors only
+
+### Use Context Managers for Resource Management
+
+```python
+with load(target) as bv:
+    iterate(bv)
+```
+
+The `with` statement ensures proper cleanup of BinaryView resources when done.
+
+</Steps>
+
+## Running the Example
+
+### Command Line Mode
+
+```bash
+python instruction_iterator.py /bin/ls
+```
+
+### Plugin Mode
+
+When loaded as a plugin:
+1. Open a binary in Binary Ninja
+2. Run `Tools > Instruction Iterator`
+3. Check the Log window for output
+
+## Expected Output
+
+```
+-------- /bin/ls --------
+START: 0x100000000
+ENTRY: 0x100001a40
+ARCH: aarch64
+
+-------- Function List --------
+<func: aarch64@0x100001a40>
+    <block: start 0x100001a40, end 0x100001a60>
+        <il: 0 @ 0x100001a40> temp0 = sp
+        <il: 1 @ 0x100001a40> sp = temp0 - 0x10
+        <il: 2 @ 0x100001a44> [temp0 - 0x8].q = x30
+        ...
+    <block: start 0x100001a60, end 0x100001a80>
+        <il: 15 @ 0x100001a60> x0 = 0x0
+        ...
+
+<func: aarch64@0x100001a40>
+    <block: start 0x100001a40, end 0x100001a60>
+        <insn: 0x100001a40> sub sp, sp, #0x10
+        <insn: 0x100001a44> str x30, [sp, #0x8]
+        ...
+```
+
+## Understanding the Output
+
+### LLIL Output Format
+
+```
+<il: INDEX @ ADDRESS> INSTRUCTION
+```
+
+- `INDEX` - IL instruction index within the function
+- `ADDRESS` - Original address in the binary
+- `INSTRUCTION` - Human-readable IL operation
+
+### Machine Code Output Format
+
+```
+<insn: ADDRESS> DISASSEMBLY
+```
+
+- `ADDRESS` - Instruction address in the binary
+- `DISASSEMBLY` - Architecture-specific assembly instruction
+
+## Advanced Iteration Patterns
+
+### Filter Functions by Name
+
+```python
+for func in bv.functions:
+    if "main" in func.name:
+        # Process only functions with 'main' in name
+        for block in func:
+            ...
+```
+
+### Count Instructions per Function
+
+```python
+for func in bv.functions:
+    instruction_count = sum(1 for block in func for insn in block)
+    log_info(f"{func.name}: {instruction_count} instructions")
+```
+
+### Access Both IL and Disassembly
+
+```python
+for func in bv.functions:
+    llil = func.low_level_il
+    for llil_block in llil:
+        for llil_insn in llil_block:
+            # Get corresponding disassembly
+            disasm = func.get_disassembly(llil_insn.address)
+            log_info(f"LLIL: {llil_insn} | ASM: {disasm}")
+```
+
+## Use Cases
+
+- **Static Analysis** - Analyze all code paths in a binary
+- **Pattern Detection** - Search for specific instruction sequences
+- **Code Coverage** - Map all executable code
+- **Metrics Collection** - Gather statistics about binary structure
+- **IL Learning** - Understand Binary Ninja's IL representations
+
+## Related Examples
+
+- [IL Parsing](/examples/il-parsing) - Deep dive into IL expression parsing
+- [Custom IL Visitor](/examples/custom-il-visitor) - Advanced IL traversal patterns
+- [Basic Analysis](/examples/basic-analysis) - Foundation for binary analysis

@@ -1,0 +1,231 @@
+---
+title: C++ API Overview
+description: Introduction to the Binary Ninja C++ API for developing plugins and analysis tools
+---
+
+The Binary Ninja C++ API provides a powerful interface for binary analysis, reverse engineering, and creating custom plugins. This API gives you direct access to Binary Ninja's core functionality including binary views, functions, architectures, intermediate languages, and type systems.
+
+## Getting Started
+
+### Installation
+
+The C++ API is available in the `binaryninjaapi` repository:
+
+```bash
+git clone https://github.com/Vector35/binaryninjaapi.git
+cd binaryninjaapi
+```
+
+### Basic Example
+
+Here's a simple program that opens a binary and displays basic information:
+
+```cpp
+#include "binaryninjaapi.h"
+#include <iostream>
+
+using namespace BinaryNinja;
+using namespace std;
+
+int main(int argc, char* argv[]) {
+    // Initialize Binary Ninja plugins
+    SetBundledPluginDirectory(GetBundledPluginDirectory());
+    InitPlugins();
+
+    // Load the binary
+    Ref<BinaryView> bv = BinaryNinja::Load(argv[1]);
+    if (!bv || bv->GetTypeName() == "Raw") {
+        cerr << "Failed to load executable" << endl;
+        return -1;
+    }
+
+    // Display basic information
+    cout << "Type: " << bv->GetTypeName() << endl;
+    cout << "Entry Point: 0x" << hex << bv->GetEntryPoint() << endl;
+    cout << "Platform: " << bv->GetDefaultPlatform()->GetName() << endl;
+
+    // Iterate through functions
+    for (auto func : bv->GetAnalysisFunctionList()) {
+        cout << "Function: " << func->GetSymbol()->GetFullName() 
+             << " at 0x" << hex << func->GetStart() << endl;
+    }
+
+    // Clean up
+    bv->GetFile()->Close();
+    BNShutdown();
+    return 0;
+}
+```
+
+See the [bin-info example](https://github.com/Vector35/binaryninjaapi/tree/dev/examples/bin-info/src/bin-info.cpp) for the complete source.
+
+## Core Namespace
+
+All C++ API classes are in the `BinaryNinja` namespace:
+
+```cpp
+namespace BinaryNinja {
+    class BinaryView;
+    class Function;
+    class Architecture;
+    class Type;
+    class LowLevelILFunction;
+    class MediumLevelILFunction;
+    class HighLevelILFunction;
+    // ... and many more
+}
+```
+
+## Reference Counting
+
+Binary Ninja uses reference-counted smart pointers for memory management. The `Ref<T>` template provides automatic reference counting:
+
+```cpp
+Ref<BinaryView> bv = BinaryNinja::Load("binary.exe");
+Ref<Function> func = bv->GetAnalysisFunction(0x401000);
+```
+
+### RefCountObject Base Class
+
+Most API objects inherit from `RefCountObject`:
+
+```cpp
+class RefCountObject {
+public:
+    std::atomic<int> m_refs;
+    RefCountObject() : m_refs(0) {}
+    virtual ~RefCountObject() {}
+
+    void AddRef();
+    void Release();
+};
+```
+
+The `Ref<T>` smart pointer automatically calls `AddRef()` and `Release()` to manage object lifetimes.
+
+## CMake Integration
+
+### Building a Plugin
+
+Create a `CMakeLists.txt` file for your project:
+
+```cmake
+cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
+
+project(my_plugin CXX C)
+
+add_executable(${PROJECT_NAME} src/main.cpp)
+
+# Find the Binary Ninja API
+find_path(
+    BN_API_PATH
+    NAMES binaryninjaapi.h
+    HINTS ../binaryninjaapi $ENV{BN_API_PATH}
+    REQUIRED
+)
+add_subdirectory(${BN_API_PATH} api)
+
+target_link_libraries(${PROJECT_NAME} binaryninjaapi)
+
+if(NOT WIN32)
+    target_link_libraries(${PROJECT_NAME} dl)
+endif()
+
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    POSITION_INDEPENDENT_CODE ON
+)
+```
+
+### Build Requirements
+
+- **C++ Standard**: C++20 or later
+- **CMake**: Version 3.15 or later
+- **Compiler**: GCC, Clang, or MSVC with C++20 support
+- **Binary Ninja**: Installation or core library
+
+### Building
+
+```bash
+mkdir build && cd build
+cmake ..
+make
+```
+
+## Key Components
+
+The C++ API is organized into several key areas:
+
+### Binary Analysis
+- [**BinaryView**](/api/cpp/binaryview) - Main interface for analyzing binary files
+- [**Function**](/api/cpp/function) - Represents functions and their properties
+- [**Architecture**](/api/cpp/architecture) - CPU architecture definitions and operations
+
+### Type System
+- [**Type**](/api/cpp/types) - Type definitions and type analysis
+- **Structure** - Structured type definitions
+- **Enumeration** - Enumeration type definitions
+
+### Intermediate Languages
+- [**LowLevelILFunction**](/api/cpp/il) - Low-level IL (LLIL) representation
+- [**MediumLevelILFunction**](/api/cpp/il) - Medium-level IL (MLIL) representation  
+- [**HighLevelILFunction**](/api/cpp/il) - High-level IL (HLIL) representation
+
+### Supporting Classes
+- **BasicBlock** - Code basic blocks
+- **Symbol** - Symbol information
+- **Platform** - Platform/OS definitions
+- **CallingConvention** - Function calling conventions
+
+## Initialization and Cleanup
+
+All Binary Ninja programs must initialize the plugin system and clean up properly:
+
+```cpp
+int main() {
+    // Initialize plugins (required)
+    SetBundledPluginDirectory(GetBundledPluginDirectory());
+    InitPlugins();
+
+    // Your code here
+    // ...
+
+    // Shutdown (required for clean exit)
+    BNShutdown();
+    return 0;
+}
+```
+
+## Examples
+
+The Binary Ninja API repository includes several complete examples:
+
+- **[bin-info](https://github.com/Vector35/binaryninjaapi/tree/dev/examples/bin-info)** - Display binary information
+- **[cmdline_disasm](https://github.com/Vector35/binaryninjaapi/tree/dev/examples/cmdline_disasm)** - Command-line disassembler
+- **[llil_parser](https://github.com/Vector35/binaryninjaapi/tree/dev/examples/llil_parser)** - Parse and display LLIL
+- **[mlil_parser](https://github.com/Vector35/binaryninjaapi/tree/dev/examples/mlil_parser)** - Parse and display MLIL
+- **[print_syscalls](https://github.com/Vector35/binaryninjaapi/tree/dev/examples/print_syscalls)** - Identify system calls
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="BinaryView" icon="file-binary" href="/api/cpp/binaryview">
+    Learn about loading and analyzing binary files
+  </Card>
+  <Card title="Function" icon="function" href="/api/cpp/function">
+    Working with functions and control flow
+  </Card>
+  <Card title="Architecture" icon="microchip" href="/api/cpp/architecture">
+    CPU architecture support and disassembly
+  </Card>
+  <Card title="IL (Intermediate Language)" icon="diagram-project" href="/api/cpp/il">
+    Analyze code using Binary Ninja's IL
+  </Card>
+</CardGroup>
+
+## Resources
+
+- [GitHub Repository](https://github.com/Vector35/binaryninjaapi)
+- [API Header File](https://github.com/Vector35/binaryninjaapi/blob/dev/binaryninjaapi.h)
+- [Python API Documentation](/api/python) (similar concepts)

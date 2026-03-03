@@ -1,0 +1,530 @@
+---
+title: 'Debugging with Binary Ninja'
+description: 'Debug binaries using Binary Ninja API and debugger integration'
+icon: 'bug'
+---
+
+## Overview
+
+Binary Ninja provides powerful debugging capabilities through its Python API and debugger plugin architecture. This guide demonstrates how to work with the debugger, set breakpoints, and automate debugging workflows.
+
+## Debugger Architecture
+
+Binary Ninja supports multiple debugger backends:
+
+<CardGroup cols={3}>
+  <Card title="LLDB" icon="terminal">
+    Native debugging on macOS and Linux
+  </Card>
+  <Card title="GDB" icon="code">
+    GNU debugger integration
+  </Card>
+  <Card title="Windows Debugger" icon="windows">
+    Windows kernel and user-mode debugging
+  </Card>
+</CardGroup>
+
+## Setting Breakpoints
+
+Set breakpoints programmatically at specific addresses or functions.
+
+<Tabs>
+  <Tab title="Basic Breakpoint">
+    ```python
+    from binaryninja import load
+
+    with load("/path/to/binary") as bv:
+        # Get debugger instance
+        dbg = bv.debugger
+
+        # Set breakpoint at address
+        dbg.add_breakpoint(0x401000)
+
+        # Set breakpoint at function
+        func = bv.get_function_at(0x401234)
+        if func:
+            dbg.add_breakpoint(func.start)
+
+        # Set breakpoint with condition
+        dbg.add_breakpoint(0x401567, enabled=True)
+    ```
+  </Tab>
+
+  <Tab title="Conditional Breakpoint">
+    ```python
+    # Set breakpoint that only triggers when condition is met
+    def breakpoint_condition(dbg, address):
+        # Get register value
+        rax = dbg.reg_value("rax")
+        # Only break if rax > 0x1000
+        return rax > 0x1000
+
+    dbg.add_breakpoint(0x401000, condition=breakpoint_condition)
+    ```
+  </Tab>
+
+  <Tab title="Function Entry/Exit">
+    ```python
+    # Break at function entry
+    func = bv.get_functions_by_name("main")[0]
+    dbg.add_breakpoint(func.start)
+
+    # Break at all return points
+    for block in func:
+        # Check if block ends with return
+        last_insn = block[-1]
+        if last_insn.operation == LowLevelILOperation.LLIL_RET:
+            dbg.add_breakpoint(last_insn.address)
+    ```
+  </Tab>
+</Tabs>
+
+## Writing Breakpoint Instructions
+
+Modify binary code to insert breakpoint instructions directly.
+
+```python
+from binaryninja.plugin import PluginCommand
+from binaryninja.log import log_error
+
+def write_breakpoint(view, start, length):
+    """
+    Fill region with breakpoint instructions for the target architecture.
+    Demonstrates cross-architecture breakpoint support.
+    """
+    # Architecture-specific breakpoint instructions
+    bkpt_str = {
+        "x86": "int3",
+        "x86_64": "int3",
+        "armv7": "bkpt",
+        "aarch64": "brk #0",
+        "mips32": "break"
+    }
+
+    if view.arch.name not in bkpt_str:
+        log_error(f"Architecture {view.arch.name} not supported")
+        return
+
+    # Assemble breakpoint instruction
+    bkpt, err = view.arch.assemble(bkpt_str[view.arch.name])
+    if bkpt is None:
+        log_error(err)
+        return
+
+    # Write breakpoint instruction(s) to region
+    view.write(start, bkpt * (length // len(bkpt)))
+
+# Register as plugin command for selected ranges
+PluginCommand.register_for_range(
+    "Convert to breakpoint",
+    "Fill region with breakpoint instructions.",
+    write_breakpoint
+)
+```
+
+Source: `~/workspace/source/python/examples/breakpoint.py:1`
+
+<Note>
+This technique modifies the binary directly. Make sure to work on a copy or use the debugger's software breakpoints instead.
+</Note>
+
+## Debugger Control Flow
+
+Control program execution during debugging.
+
+<Steps>
+  <Step title="Start Debugging Session">
+    ```python
+    from binaryninja import load
+
+    with load("/path/to/binary") as bv:
+        dbg = bv.debugger
+
+        # Launch target
+        dbg.launch()
+
+        # Or attach to running process
+        # dbg.attach(pid=1234)
+    ```
+  </Step>
+
+  <Step title="Control Execution">
+    ```python
+    # Continue execution
+    dbg.go()
+
+    # Step one instruction
+    dbg.step_into()
+
+    # Step over function calls
+    dbg.step_over()
+
+    # Run until function returns
+    dbg.step_return()
+
+    # Pause execution
+    dbg.pause()
+    ```
+  </Step>
+
+  <Step title="Inspect State">
+    ```python
+    # Get current instruction pointer
+    rip = dbg.reg_value("rip")
+    print(f"Current IP: {rip:#x}")
+
+    # Read register values
+    rax = dbg.reg_value("rax")
+    rbx = dbg.reg_value("rbx")
+
+    # Read memory
+    data = dbg.read_memory(0x404000, 16)
+
+    # Get current stack
+    rsp = dbg.reg_value("rsp")
+    stack_data = dbg.read_memory(rsp, 0x100)
+    ```
+  </Step>
+
+  <Step title="Modify State">
+    ```python
+    # Set register value
+    dbg.set_reg_value("rax", 0x1234)
+
+    # Write memory
+    dbg.write_memory(0x404000, b"\x41\x42\x43\x44")
+
+    # Modify instruction pointer
+    dbg.set_reg_value("rip", 0x401234)
+    ```
+  </Step>
+</Steps>
+
+## Automated Analysis During Debugging
+
+Combine debugging with Binary Ninja's analysis capabilities.
+
+```python
+from binaryninja import load, BackgroundTaskThread
+from binaryninja.enums import LowLevelILOperation
+
+class AutomatedDebugger(BackgroundTaskThread):
+    def __init__(self, bv):
+        BackgroundTaskThread.__init__(self, 'Automated Debugging', True)
+        self.bv = bv
+
+    def run(self):
+        dbg = self.bv.debugger
+
+        # Set breakpoints at all indirect calls
+        for func in self.bv.functions:
+            for block in func.low_level_il:
+                for instr in block:
+                    if instr.operation == LowLevelILOperation.LLIL_CALL:
+                        # Check if call target is indirect
+                        if not isinstance(instr.dest, int):
+                            print(f"Indirect call at {instr.address:#x}")
+                            dbg.add_breakpoint(instr.address)
+
+        # Launch and run
+        dbg.launch()
+        dbg.go()
+
+        # When breakpoint hit, log and continue
+        while dbg.is_running:
+            if dbg.is_stopped:
+                rip = dbg.reg_value("rip")
+                print(f"Hit breakpoint at {rip:#x}")
+
+                # Log call target
+                func = self.bv.get_function_at(rip)
+                if func:
+                    llil = func.low_level_il.get_instruction_start(rip)
+                    if llil is not None:
+                        instr = func.low_level_il[llil]
+                        target = dbg.reg_value(instr.dest.name)
+                        print(f"  Indirect call target: {target:#x}")
+
+                dbg.go()
+```
+
+<Warning>
+Use `BackgroundTaskThread` for long-running debugging tasks to prevent UI freezing.
+</Warning>
+
+## Debugging Plugin Example
+
+Create a plugin that uses the debugger to collect runtime information.
+
+```python
+from binaryninja import PluginCommand, BackgroundTaskThread
+from binaryninja.interaction import show_message_box
+
+class RuntimeTracer(BackgroundTaskThread):
+    """Trace function calls at runtime"""
+
+    def __init__(self, bv, func):
+        BackgroundTaskThread.__init__(self, 'Runtime Tracer', True)
+        self.bv = bv
+        self.func = func
+        self.call_trace = []
+
+    def run(self):
+        dbg = self.bv.debugger
+
+        # Set breakpoint at function entry
+        dbg.add_breakpoint(self.func.start)
+
+        # Set breakpoints at all call sites
+        for ref in self.func.call_sites:
+            dbg.add_breakpoint(ref.address)
+
+        dbg.launch()
+        dbg.go()
+
+        while dbg.is_running:
+            if dbg.is_stopped:
+                rip = dbg.reg_value("rip")
+
+                # Log call
+                self.call_trace.append({
+                    'address': rip,
+                    'registers': {
+                        'rax': dbg.reg_value("rax"),
+                        'rdi': dbg.reg_value("rdi"),
+                        'rsi': dbg.reg_value("rsi")
+                    }
+                })
+
+                dbg.go()
+
+        # Display results
+        self.show_results()
+
+    def show_results(self):
+        output = "Call Trace:\n\n"
+        for entry in self.call_trace:
+            output += f"Address: {entry['address']:#x}\n"
+            for reg, val in entry['registers'].items():
+                output += f"  {reg} = {val:#x}\n"
+            output += "\n"
+
+        show_message_box("Runtime Trace Results", output)
+
+def start_tracer(bv, func):
+    tracer = RuntimeTracer(bv, func)
+    tracer.start()
+
+PluginCommand.register_for_function(
+    "Trace Runtime Calls",
+    "Trace function calls at runtime",
+    start_tracer
+)
+```
+
+## Memory Snapshots
+
+Capture and compare memory state at different execution points.
+
+```python
+class MemorySnapshot:
+    def __init__(self, dbg, ranges):
+        """
+        Take snapshot of memory regions
+
+        Args:
+            dbg: Debugger instance
+            ranges: List of (address, size) tuples
+        """
+        self.snapshots = {}
+        for addr, size in ranges:
+            self.snapshots[addr] = dbg.read_memory(addr, size)
+
+    def diff(self, other):
+        """Compare with another snapshot"""
+        differences = []
+
+        for addr, data in self.snapshots.items():
+            if addr in other.snapshots:
+                other_data = other.snapshots[addr]
+                for i, (b1, b2) in enumerate(zip(data, other_data)):
+                    if b1 != b2:
+                        differences.append({
+                            'address': addr + i,
+                            'before': b1,
+                            'after': b2
+                        })
+
+        return differences
+
+# Usage
+dbg = bv.debugger
+dbg.launch()
+dbg.go()
+
+# Take snapshot at first breakpoint
+snapshot1 = MemorySnapshot(dbg, [(0x404000, 0x1000)])
+
+dbg.go()
+
+# Take snapshot at second breakpoint
+snapshot2 = MemorySnapshot(dbg, [(0x404000, 0x1000)])
+
+# Compare
+differences = snapshot1.diff(snapshot2)
+for diff in differences:
+    print(f"{diff['address']:#x}: {diff['before']:#x} -> {diff['after']:#x}")
+```
+
+## Scripting Common Debug Tasks
+
+<Tabs>
+  <Tab title="Dump Function Arguments">
+    ```python
+    def dump_function_args(dbg, func, arch):
+        """Dump function arguments at entry"""
+        # Get calling convention
+        cc = func.calling_convention
+        if cc is None:
+            cc = bv.platform.default_calling_convention
+
+        # Read argument registers
+        args = []
+        for i, reg in enumerate(cc.int_arg_regs):
+            value = dbg.reg_value(reg)
+            args.append(f"arg{i} ({reg}) = {value:#x}")
+
+        print(f"Function {func.name} called with:")
+        for arg in args:
+            print(f"  {arg}")
+
+    # Set breakpoint at function entry
+    func = bv.get_functions_by_name("target_function")[0]
+    dbg.add_breakpoint(func.start)
+
+    # When hit, dump args
+    dump_function_args(dbg, func, bv.arch)
+    ```
+  </Tab>
+
+  <Tab title="Find Write to Address">
+    ```python
+    def find_write(dbg, target_addr):
+        """Find when memory address is written"""
+        # Set watchpoint
+        dbg.add_watchpoint(target_addr, size=8, write=True)
+
+        dbg.go()
+
+        while dbg.is_running:
+            if dbg.is_stopped:
+                rip = dbg.reg_value("rip")
+                print(f"Write to {target_addr:#x} from {rip:#x}")
+
+                # Disassemble instruction
+                func = bv.get_function_at(rip)
+                if func:
+                    print(f"  In function: {func.name}")
+
+                break
+    ```
+  </Tab>
+
+  <Tab title="Trace Return Values">
+    ```python
+    def trace_returns(dbg, func):
+        """Trace all return values from a function"""
+        returns = []
+
+        # Find all return points
+        for block in func:
+            for instr in block:
+                if instr.operation == LowLevelILOperation.LLIL_RET:
+                    dbg.add_breakpoint(instr.address)
+
+        dbg.go()
+
+        while dbg.is_running:
+            if dbg.is_stopped:
+                # Get return value (usually in rax/eax)
+                ret_val = dbg.reg_value("rax")
+                returns.append(ret_val)
+                print(f"Return value: {ret_val:#x}")
+                dbg.go()
+
+        return returns
+    ```
+  </Tab>
+</Tabs>
+
+## Integration with Analysis
+
+Update Binary Ninja's analysis based on runtime information.
+
+```python
+from binaryninja import BackgroundTaskThread
+
+class AnalysisUpdater(BackgroundTaskThread):
+    def __init__(self, bv):
+        BackgroundTaskThread.__init__(self, 'Updating Analysis', True)
+        self.bv = bv
+
+    def run(self):
+        dbg = self.bv.debugger
+
+        # Resolve indirect calls at runtime
+        for func in self.bv.functions:
+            for ref in func.call_sites:
+                # Check if call is indirect
+                llil = func.low_level_il.get_instruction_start(ref.address)
+                if llil is not None:
+                    instr = func.low_level_il[llil]
+                    if instr.operation == LowLevelILOperation.LLIL_CALL:
+                        if not isinstance(instr.dest, int):
+                            # Set breakpoint
+                            dbg.add_breakpoint(ref.address)
+
+        dbg.go()
+
+        while dbg.is_running:
+            if dbg.is_stopped:
+                rip = dbg.reg_value("rip")
+                func = self.bv.get_function_at(rip)
+
+                if func:
+                    # Get actual call target
+                    llil = func.low_level_il.get_instruction_start(rip)
+                    instr = func.low_level_il[llil]
+                    target = dbg.reg_value(instr.dest.name)
+
+                    # Update analysis with discovered target
+                    func.set_user_indirect_branches(
+                        rip,
+                        [(self.bv.arch, target)]
+                    )
+                    print(f"Resolved indirect call at {rip:#x} -> {target:#x}")
+
+                dbg.go()
+
+        # Reanalyze with new information
+        self.bv.update_analysis_and_wait()
+```
+
+Source: `~/workspace/source/python/examples/update_analysis.py:1`
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Binary Analysis" icon="magnifying-glass-chart" href="/guides/binary-analysis">
+    Combine debugging with static analysis techniques
+  </Card>
+  <Card title="Data Flow Analysis" icon="diagram-project" href="/guides/data-flow-analysis">
+    Use runtime information to improve data flow analysis
+  </Card>
+</CardGroup>
+
+## Related Resources
+
+- [Debugger API Reference](/api/debugger)
+- [BackgroundTaskThread Reference](/api/background-task)
+- [Architecture API Reference](/api/architecture)

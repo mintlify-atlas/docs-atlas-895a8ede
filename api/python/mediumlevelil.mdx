@@ -1,0 +1,460 @@
+---
+title: Medium Level IL API  
+description: Work with Binary Ninja's Medium Level Intermediate Language
+---
+
+The Medium Level IL (MLIL) is a higher-level intermediate representation that simplifies LLIL by abstracting away architecture-specific details and introducing variables.
+
+## Overview
+
+MLIL provides a cleaner representation than LLIL:
+
+- **Variables** - Introduces typed variables instead of registers
+- **Simpler operations** - Abstracts complex patterns
+- **SSA form** - Powerful for data flow analysis
+- **Type inference** - Propagates type information
+- **Portable** - More architecture-independent
+
+### Accessing MLIL
+
+```python
+# From a function
+mlil = func.mlil
+mlil_ssa = func.mlil.ssa_form
+
+# Get MLIL at specific address
+mlil_instr = func.get_medium_level_il_at(0x401000)
+
+# From LLIL
+llil_instr = func.get_low_level_il_at(0x401000)
+if llil_instr.mlil:
+    mlil_instr = llil_instr.mlil
+
+# Iterate all instructions
+for instr in mlil.instructions:
+    print(f"{instr.address:#x}: {instr}")
+```
+
+## MediumLevelILFunction
+
+Represents a function in MLIL.
+
+<ParamField path="source_function" type="Function">
+  The original Function object
+</ParamField>
+
+<ParamField path="ssa_form" type="MediumLevelILFunction">
+  SSA form of this IL function
+</ParamField>
+
+<ParamField path="non_ssa_form" type="MediumLevelILFunction">
+  Non-SSA form
+</ParamField>
+
+<ParamField path="instructions" type="Generator[MediumLevelILInstruction]">
+  All IL instructions
+</ParamField>
+
+<ParamField path="basic_blocks" type="list[MediumLevelILBasicBlock]">
+  Basic blocks in the IL function
+</ParamField>
+
+<ParamField path="vars" type="list[Variable]">
+  All variables used in this function
+</ParamField>
+
+### Iterating MLIL
+
+```python
+# By instruction
+for instr in mlil.instructions:
+    print(instr)
+
+# By basic block
+for block in mlil:
+    print(f"Block {block.start}-{block.end}")
+    for instr in block:
+        print(f"  {instr}")
+
+# Get instruction by index
+instr = mlil[5]
+```
+
+## MediumLevelILInstruction
+
+Base class for all MLIL instructions.
+
+### Core Properties
+
+<ParamField path="operation" type="MediumLevelILOperation">
+  The operation type (MLIL_SET_VAR, MLIL_CALL, etc.)
+</ParamField>
+
+<ParamField path="address" type="int">
+  Address of the native instruction
+</ParamField>
+
+<ParamField path="size" type="int">
+  Size of the operation in bytes
+</ParamField>
+
+<ParamField path="expr_index" type="int">
+  Expression index in the IL
+</ParamField>
+
+<ParamField path="instr_index" type="int">
+  Instruction index
+</ParamField>
+
+<ParamField path="function" type="MediumLevelILFunction">
+  The IL function containing this instruction
+</ParamField>
+
+<ParamField path="il_basic_block" type="MediumLevelILBasicBlock">
+  The basic block containing this instruction
+</ParamField>
+
+### Instruction Types
+
+```python
+from binaryninja.commonil import (
+    Constant, Call, SetVar, VariableInstruction,
+    Load, Store, BinaryOperation, Return
+)
+
+for instr in mlil.instructions:
+    if isinstance(instr, SetVar):
+        print(f"{instr.dest} = {instr.src}")
+    
+    elif isinstance(instr, Call):
+        print(f"Call {instr.dest}({instr.params})")
+    
+    elif isinstance(instr, Load):
+        print(f"Load from {instr.src}")
+    
+    elif isinstance(instr, Constant):
+        print(f"Constant: {instr.value}")
+```
+
+### Variable Operations
+
+MLIL uses Variables instead of registers:
+
+```python
+# SET_VAR: var = src
+if instr.operation == MediumLevelILOperation.MLIL_SET_VAR:
+    var = instr.dest  # Variable
+    src = instr.src   # Expression
+    print(f"{var.name} = {src}")
+
+# VAR: read variable
+if instr.operation == MediumLevelILOperation.MLIL_VAR:
+    var = instr.src  # Variable
+    print(f"Read {var.name}: {var.type}")
+
+# SET_VAR_FIELD: set structure field
+if instr.operation == MediumLevelILOperation.MLIL_SET_VAR_FIELD:
+    var = instr.dest
+    offset = instr.offset
+    src = instr.src
+    print(f"{var.name}[{offset}] = {src}")
+```
+
+### Call Operations
+
+```python
+# CALL: function call
+if instr.operation == MediumLevelILOperation.MLIL_CALL:
+    dest = instr.dest      # Call target
+    params = instr.params  # List of parameters
+    output = instr.output  # List of output variables
+    
+    print(f"Call {dest}")
+    for i, param in enumerate(params):
+        print(f"  Param {i}: {param}")
+    for var in output:
+        print(f"  Output: {var}")
+
+# TAILCALL: tail call optimization
+if instr.operation == MediumLevelILOperation.MLIL_TAILCALL:
+    dest = instr.dest
+    params = instr.params
+    print(f"Tail call {dest}")
+
+# SYSCALL: system call
+if instr.operation == MediumLevelILOperation.MLIL_SYSCALL:
+    params = instr.params
+    output = instr.output
+    print(f"Syscall with {len(params)} params")
+```
+
+### Memory Operations
+
+```python
+# LOAD: read from memory
+if instr.operation == MediumLevelILOperation.MLIL_LOAD:
+    addr = instr.src
+    size = instr.size
+    print(f"Load {size} bytes from {addr}")
+
+# LOAD_STRUCT: load structure member
+if instr.operation == MediumLevelILOperation.MLIL_LOAD_STRUCT:
+    addr = instr.src
+    offset = instr.offset
+    print(f"Load from {addr}+{offset}")
+
+# STORE: write to memory
+if instr.operation == MediumLevelILOperation.MLIL_STORE:
+    dest = instr.dest
+    src = instr.src
+    print(f"Store {src} to {dest}")
+
+# STORE_STRUCT: store to structure member
+if instr.operation == MediumLevelILOperation.MLIL_STORE_STRUCT:
+    dest = instr.dest
+    offset = instr.offset
+    src = instr.src
+    print(f"Store {src} to {dest}+{offset}")
+```
+
+### Arithmetic & Logic
+
+```python
+from binaryninja.enums import MediumLevelILOperation
+
+# Binary operations
+if instr.operation in [MediumLevelILOperation.MLIL_ADD,
+                       MediumLevelILOperation.MLIL_SUB,
+                       MediumLevelILOperation.MLIL_MUL]:
+    left = instr.left
+    right = instr.right
+    print(f"{left} {instr.operation.name} {right}")
+
+# Comparisons
+if instr.operation in [MediumLevelILOperation.MLIL_CMP_E,
+                       MediumLevelILOperation.MLIL_CMP_NE,
+                       MediumLevelILOperation.MLIL_CMP_SLT]:
+    print(f"Compare: {instr.left} vs {instr.right}")
+```
+
+## Variables
+
+MLIL introduces typed variables:
+
+```python
+# Get all variables in function
+for var in mlil.vars:
+    print(f"{var.name}: {var.type}")
+    print(f"  Source: {var.source_type}")
+    print(f"  Storage: {var.storage}")
+
+# Variable properties (3.0 API)
+var = mlil.vars[0]
+var.name = "buffer"  # Rename
+var.type = Type.array(Type.char(), 256)  # Set type
+
+# Variable uses
+uses = mlil.get_var_uses(var)
+for use in uses:
+    print(f"Used at: {use}")
+
+# Variable definitions
+defs = mlil.get_var_definitions(var)
+for def_site in defs:
+    print(f"Defined at: {def_site}")
+```
+
+## SSA Form
+
+SSA form is particularly powerful in MLIL:
+
+```python
+# Get SSA form
+mlil_ssa = mlil.ssa_form
+
+# SSA variables
+for instr in mlil_ssa.instructions:
+    if instr.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA:
+        var_ssa = instr.dest  # SSAVariable
+        print(f"{var_ssa.var.name}#{var_ssa.version} = {instr.src}")
+
+# Get SSA variable definition
+if instr.operation == MediumLevelILOperation.MLIL_VAR_SSA:
+    var_ssa = instr.src
+    def_instr = mlil_ssa.get_ssa_var_definition(var_ssa)
+    print(f"Defined by: {def_instr}")
+
+# Get SSA variable uses
+uses = mlil_ssa.get_ssa_var_uses(var_ssa)
+for use in uses:
+    print(f"Used at: {use}")
+
+# Phi nodes
+if instr.operation == MediumLevelILOperation.MLIL_VAR_PHI:
+    dest = instr.dest  # Destination SSAVariable
+    sources = instr.src  # List of source SSAVariables
+    print(f"{dest} = φ({', '.join(str(s) for s in sources)})")
+```
+
+### SSAVariable Class
+
+```python
+ssa_var = instr.dest
+
+print(f"Variable: {ssa_var.var.name}")
+print(f"Version: {ssa_var.version}")
+print(f"Type: {ssa_var.type}")
+
+# Get definition site
+def_instr = ssa_var.def_site
+if def_instr:
+    print(f"Defined at: {def_instr}")
+
+# Get use sites
+for use in ssa_var.use_sites:
+    print(f"Used at: {use}")
+```
+
+## Lifting to HLIL
+
+MLIL instructions can be lifted to HLIL:
+
+```python
+for instr in mlil.instructions:
+    # Get corresponding HLIL
+    if instr.hlil:
+        print(f"MLIL: {instr}")
+        print(f"HLIL: {instr.hlil}")
+```
+
+## Example: Variable Tracking
+
+```python
+def track_variable(func, var_name):
+    """Track all uses and definitions of a variable."""
+    mlil_ssa = func.mlil.ssa_form
+    
+    # Find all SSA versions of the variable
+    results = {'definitions': [], 'uses': []}
+    
+    for var in mlil_ssa.vars:
+        if var.name == var_name:
+            # Get all SSA versions
+            for version in range(100):  # Arbitrary limit
+                try:
+                    ssa_var = SSAVariable(var, version)
+                    
+                    # Get definition
+                    def_instr = mlil_ssa.get_ssa_var_definition(ssa_var)
+                    if def_instr:
+                        results['definitions'].append({
+                            'version': version,
+                            'address': def_instr.address,
+                            'instr': str(def_instr)
+                        })
+                    
+                    # Get uses
+                    uses = mlil_ssa.get_ssa_var_uses(ssa_var)
+                    for use in uses:
+                        results['uses'].append({
+                            'version': version,
+                            'address': use.address,
+                            'instr': str(use)
+                        })
+                except:
+                    break
+    
+    return results
+
+# Usage
+results = track_variable(func, "arg1")
+for def_info in results['definitions']:
+    print(f"v{def_info['version']} defined at {def_info['address']:#x}: "
+          f"{def_info['instr']}")
+```
+
+## Example: Call Graph Analysis
+
+```python
+def analyze_calls(func):
+    """Analyze all calls in a function."""
+    calls = []
+    
+    for instr in func.mlil.instructions:
+        from binaryninja.commonil import Call
+        
+        if isinstance(instr, Call):
+            call_info = {
+                'address': instr.address,
+                'target': str(instr.dest),
+                'params': [str(p) for p in instr.params],
+                'outputs': [str(o) for o in instr.output]
+            }
+            
+            # Try to resolve target
+            if isinstance(instr.dest, Constant):
+                target_addr = instr.dest.value
+                target_func = func.view.get_function_at(target_addr)
+                if target_func:
+                    call_info['target_name'] = target_func.name
+            
+            calls.append(call_info)
+    
+    return calls
+
+# Usage
+for call in analyze_calls(func):
+    target = call.get('target_name', call['target'])
+    print(f"{call['address']:#x}: Call to {target}")
+    print(f"  Parameters: {', '.join(call['params'])}")
+```
+
+## Example: Data Flow Analysis
+
+```python
+def find_tainted_paths(func, source_var):
+    """Find data flow paths from a source variable."""
+    mlil_ssa = func.mlil.ssa_form
+    
+    tainted = set()
+    worklist = []
+    
+    # Find all versions of source variable
+    for var in mlil_ssa.vars:
+        if var.name == source_var:
+            for version in range(100):
+                try:
+                    ssa_var = SSAVariable(var, version)
+                    worklist.append(ssa_var)
+                    tainted.add(ssa_var)
+                except:
+                    break
+    
+    # Propagate taint
+    while worklist:
+        current = worklist.pop(0)
+        
+        # Find uses of current variable
+        uses = mlil_ssa.get_ssa_var_uses(current)
+        for use in uses:
+            # If use is a SET_VAR, taint the destination
+            if use.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA:
+                dest = use.dest
+                if dest not in tainted:
+                    tainted.add(dest)
+                    worklist.append(dest)
+    
+    return tainted
+
+# Usage
+tainted = find_tainted_paths(func, "arg1")
+for var in tainted:
+    print(f"Tainted: {var}")
+```
+
+## See Also
+
+- [Low Level IL](/api/python/lowlevelil) - Lower-level IL
+- [High Level IL](/api/python/highlevelil) - Higher-level decompilation
+- [Function API](/api/python/function) - Function analysis
+- [Types API](/api/python/types) - Type system

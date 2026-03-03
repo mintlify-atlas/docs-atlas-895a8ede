@@ -1,0 +1,415 @@
+---
+title: Function API
+description: Work with functions, basic blocks, and disassembly in Binary Ninja
+---
+
+The `Function` class represents a function in a binary. It provides access to basic blocks, IL representations, variables, calling conventions, and more.
+
+## Overview
+
+Functions are central to binary analysis in Binary Ninja. Each function contains:
+
+- **Basic blocks** - Control flow graph nodes
+- **IL representations** - LLIL, MLIL, and HLIL
+- **Variables** - Parameters and local variables
+- **Type information** - Function signature
+- **Call graph** - Callers and callees
+
+### Getting Functions
+
+```python
+# From BinaryView
+func = bv.get_function_at(0x401000)
+funcs = bv.get_functions_by_name("main")
+
+# From address with recent usage context
+block = bv.get_recent_basic_block_at(addr)
+if block:
+    func = block.function
+
+# Iterate all functions
+for func in bv.functions:
+    print(f"{func.name} @ {func.start:#x}")
+```
+
+## Function Class
+
+### Core Properties
+
+<ParamField path="name" type="str">
+  Function name (derived from symbol)
+</ParamField>
+
+<ParamField path="start" type="int">
+  Start address of the function
+</ParamField>
+
+<ParamField path="symbol" type="CoreSymbol">
+  Symbol associated with this function
+</ParamField>
+
+<ParamField path="arch" type="Architecture">
+  Architecture for this function
+</ParamField>
+
+<ParamField path="platform" type="Platform">
+  Platform (calling convention and ABI)
+</ParamField>
+
+<ParamField path="view" type="BinaryView">
+  BinaryView containing this function
+</ParamField>
+
+<ParamField path="basic_blocks" type="BasicBlockList">
+  List of basic blocks in this function
+</ParamField>
+
+### Function Type and Signature
+
+```python
+# Get function type
+func_type = func.type
+print(f"Return type: {func_type.return_value}")
+print(f"Parameters: {func_type.parameters}")
+
+# Set function signature
+from binaryninja import Type
+
+new_type = Type.function(
+    Type.int(4),  # return type
+    [
+        (Type.pointer(bv.arch, Type.char()), "arg1"),
+        (Type.int(4), "arg2")
+    ]
+)
+func.type = new_type
+
+# Access type tokens (for display)
+for token in func.type_tokens:
+    print(token.text, end="")
+```
+
+<ParamField path="type" type="Type">
+  Function type signature
+  
+  Can be set to update the function's type
+</ParamField>
+
+<ParamField path="return_type" type="Type">
+  Return type of the function
+  
+  Can be set independently
+</ParamField>
+
+<ParamField path="calling_convention" type="CallingConvention">
+  Calling convention used by this function
+</ParamField>
+
+### IL Access
+
+```python
+# Get IL representations
+llil = func.llil  # Low Level IL
+mlil = func.mlil  # Medium Level IL  
+hlil = func.hlil  # High Level IL
+
+# SSA forms
+llil_ssa = func.llil.ssa_form
+mlil_ssa = func.mlil.ssa_form
+hlil_ssa = func.hlil.ssa_form
+
+# Get IL at specific address
+llil_instr = func.get_low_level_il_at(0x401000)
+mlil_instr = func.get_medium_level_il_at(0x401000)
+hlil_instr = func.get_high_level_il_at(0x401000)
+```
+
+<ParamField path="llil" type="LowLevelILFunction">
+  Low Level IL function object
+</ParamField>
+
+<ParamField path="mlil" type="MediumLevelILFunction">
+  Medium Level IL function object
+</ParamField>
+
+<ParamField path="hlil" type="HighLevelILFunction">
+  High Level IL function object
+</ParamField>
+
+### Basic Blocks
+
+```python
+# Iterate basic blocks
+for block in func:
+    print(f"Block @ {block.start:#x}-{block.end:#x}")
+    
+    # Outgoing edges
+    for edge in block.outgoing_edges:
+        print(f"  -> {edge.target.start:#x} ({edge.type})")
+    
+    # Disassembly
+    for instr in block:
+        print(f"  {instr.address:#x}: {instr}")
+
+# Access by index
+first_block = func.basic_blocks[0]
+
+# Get block at address
+block = func.get_basic_block_at(0x401010)
+```
+
+### Variables (3.0 API)
+
+Binary Ninja 3.0 greatly enhanced variable handling:
+
+```python
+# Get all variables
+for var in func.vars:
+    print(f"{var.name}: {var.type}")
+
+# Get parameters
+for param in func.parameter_vars:
+    print(f"Parameter: {param.name}: {param.type}")
+
+# Rename variable
+var = func.vars[0]
+var.name = "buffer"
+
+# Set variable type
+var.type = Type.array(Type.char(), 256)
+
+# Access variable properties
+print(f"Source type: {var.source_type}")
+print(f"Storage: {var.storage}")
+```
+
+<ParamField path="vars" type="list[Variable]">
+  All variables in the function
+</ParamField>
+
+<ParamField path="parameter_vars" type="ParameterVariables">
+  Function parameters
+</ParamField>
+
+<ParamField path="create_user_var" type="(var: Variable, var_type: Type, name: str)">
+  Create or update a user variable
+  
+  <Expandable title="Parameters">
+    <ResponseField name="var" type="Variable" required>
+      Variable to create or update
+    </ResponseField>
+    <ResponseField name="var_type" type="Type" required>
+      Type for the variable
+    </ResponseField>
+    <ResponseField name="name" type="str" required>
+      Name for the variable
+    </ResponseField>
+  </Expandable>
+  
+  <Note>
+  In 3.0, prefer using `var.name` and `var.type` properties directly
+  </Note>
+</ParamField>
+
+### Call Graph
+
+```python
+# Get callers
+for caller_ref in func.callers:
+    caller = caller_ref.function
+    print(f"Called from {caller.name} @ {caller_ref.address:#x}")
+
+# Get callees  
+for callee in func.callees:
+    print(f"Calls {callee.name} @ {callee.start:#x}")
+
+# Call sites
+for call_site in func.call_sites:
+    print(f"Call at {call_site.address:#x}")
+```
+
+<ParamField path="callers" type="list[ReferenceSource]">
+  Functions that call this function
+</ParamField>
+
+<ParamField path="callees" type="list[Function]">
+  Functions called by this function
+</ParamField>
+
+### Code References
+
+```python
+# Get code references TO this function
+for ref in func.code_refs:
+    print(f"Referenced from {ref.address:#x}")
+    if ref.function:
+        print(f"  in function {ref.function.name}")
+
+# Get code references FROM this function  
+for addr in func.code_refs_from:
+    print(f"References {addr:#x}")
+```
+
+## DisassemblySettings
+
+Control disassembly formatting:
+
+```python
+from binaryninja.function import DisassemblySettings
+from binaryninja.enums import DisassemblyOption
+
+# Create settings
+settings = DisassemblySettings()
+settings.set_option(DisassemblyOption.ShowAddress, True)
+settings.set_option(DisassemblyOption.ShowVariableTypes, True)
+settings.width = 80
+
+# Get disassembly text
+for block in func:
+    for line in block.get_disassembly_text(settings):
+        print(line)
+```
+
+## Iteration Patterns
+
+### Iterate Instructions
+
+```python
+# Via basic blocks
+for block in func:
+    for instr_tokens, addr in block:
+        instr_text = ''.join(t.text for t in instr_tokens)
+        print(f"{addr:#x}: {instr_text}")
+
+# Via LLIL
+for block in func.llil:
+    for instr in block:
+        print(f"{instr.address:#x}: {instr}")
+```
+
+### Iterate IL Instructions
+
+```python
+# HLIL instructions
+for instr in func.hlil.instructions:
+    print(instr)
+    
+    # Access operands
+    for operand in instr.operands:
+        if isinstance(operand, HighLevelILInstruction):
+            print(f"  Operand: {operand}")
+
+# MLIL instructions
+for instr in func.mlil.instructions:
+    # Check instruction type
+    from binaryninja.commonil import Constant, Call
+    
+    if isinstance(instr, Call):
+        print(f"Call to {instr.dest}")
+    elif isinstance(instr, Constant):
+        print(f"Constant: {instr.value}")
+```
+
+## Analysis Control
+
+```python
+# Request analysis update
+func.request_update()
+
+# Wait for analysis to complete
+func.view.update_analysis_and_wait()
+
+# Check analysis state
+from binaryninja.enums import AnalysisState
+
+if func.analysis_state == AnalysisState.AnalysisStateFinished:
+    print("Analysis complete")
+```
+
+## AdvancedILFunctionList (3.0)
+
+Efficiently iterate IL across multiple functions:
+
+```python
+from binaryninja import AdvancedILFunctionList
+
+# Parallel IL generation (50-75% faster)
+for func in AdvancedILFunctionList(bv, preload_limit=400):
+    analyze_hlil(func.hlil)
+
+# For subset of functions
+interesting_funcs = [f for f in bv.functions if 'crypt' in f.name]
+for func in AdvancedILFunctionList(bv, functions=interesting_funcs):
+    process(func.mlil)
+```
+
+## Example: Find Dangerous Functions
+
+```python
+def find_dangerous_calls(bv):
+    """Find calls to potentially dangerous functions."""
+    dangerous = ['strcpy', 'sprintf', 'gets', 'system', 'exec']
+    results = []
+    
+    for func in bv.functions:
+        for callee in func.callees:
+            if any(d in callee.name.lower() for d in dangerous):
+                # Find call sites
+                for ref in callee.callers:
+                    if ref.function == func:
+                        results.append({
+                            'caller': func.name,
+                            'callee': callee.name,
+                            'address': ref.address
+                        })
+    
+    return results
+
+# Usage
+for result in find_dangerous_calls(bv):
+    print(f"{result['caller']} calls {result['callee']} "
+          f"at {result['address']:#x}")
+```
+
+## Example: Analyze Function Complexity
+
+```python
+def analyze_complexity(func):
+    """Compute basic complexity metrics."""
+    metrics = {
+        'name': func.name,
+        'address': func.start,
+        'basic_blocks': len(func.basic_blocks),
+        'instructions': 0,
+        'calls': len(func.callees),
+        'callers': len(func.callers),
+        'variables': len(func.vars),
+        'cyclomatic': 0
+    }
+    
+    # Count instructions
+    for block in func.llil:
+        metrics['instructions'] += len(block)
+    
+    # Cyclomatic complexity: edges - nodes + 2
+    edges = sum(len(b.outgoing_edges) for b in func.basic_blocks)
+    metrics['cyclomatic'] = edges - len(func.basic_blocks) + 2
+    
+    return metrics
+
+# Find most complex functions
+complexities = [analyze_complexity(f) for f in bv.functions]
+complexities.sort(key=lambda x: x['cyclomatic'], reverse=True)
+
+for c in complexities[:10]:
+    print(f"{c['name']}: cyclomatic={c['cyclomatic']}, "
+          f"blocks={c['basic_blocks']}, calls={c['calls']}")
+```
+
+## See Also
+
+- [BinaryView API](/api/python/binaryview) - Binary file access
+- [Low Level IL](/api/python/lowlevelil) - Low-level intermediate language
+- [Medium Level IL](/api/python/mediumlevelil) - Medium-level IL
+- [High Level IL](/api/python/highlevelil) - High-level decompilation
+- [Types API](/api/python/types) - Type system

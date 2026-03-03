@@ -1,0 +1,381 @@
+---
+title: Architecture API
+description: Work with CPU architectures, registers, and instruction information
+---
+
+The `Architecture` class provides an interface to CPU architectures in Binary Ninja. It handles instruction disassembly, lifting to IL, register information, and architecture-specific operations.
+
+## Overview
+
+Architectures in Binary Ninja represent CPU instruction sets (x86, ARM, MIPS, etc.). They provide:
+
+- **Instruction decoding** - Disassemble machine code
+- **IL lifting** - Convert to Low Level IL
+- **Register information** - Names, sizes, relationships
+- **Calling conventions** - ABI details
+- **Intrinsics** - Architecture-specific operations
+
+### Getting Architectures
+
+```python
+from binaryninja import Architecture
+
+# Get architecture by name
+x86_64 = Architecture['x86_64']
+arm64 = Architecture['aarch64']
+mips = Architecture['mips32']
+
+# List all architectures
+for arch in Architecture:
+    print(arch.name)
+
+# From a BinaryView
+arch = bv.arch
+
+# From a function
+arch = func.arch
+```
+
+## Architecture Class
+
+### Core Properties
+
+<ParamField path="name" type="str">
+  Architecture name (e.g., "x86_64", "aarch64")
+</ParamField>
+
+<ParamField path="endianness" type="Endianness">
+  Byte order: LittleEndian or BigEndian
+</ParamField>
+
+<ParamField path="address_size" type="int">
+  Size of addresses in bytes
+</ParamField>
+
+<ParamField path="default_int_size" type="int">
+  Default integer size in bytes
+</ParamField>
+
+<ParamField path="max_instr_length" type="int">
+  Maximum instruction length in bytes
+</ParamField>
+
+<ParamField path="instr_alignment" type="int">
+  Required instruction alignment
+</ParamField>
+
+### Registers
+
+Access register information:
+
+```python
+# Get all registers
+for reg_name, reg_info in arch.regs.items():
+    print(f"{reg_name}: {reg_info.size} bytes")
+
+# Get specific register
+reg_info = arch.regs['rax']
+print(f"Size: {reg_info.size}")
+print(f"Offset: {reg_info.offset}")
+print(f"Index: {reg_info.index}")
+
+# Get register name from index
+reg_name = arch.get_reg_name(0)
+
+# Stack pointer
+sp_name = arch.stack_pointer
+print(f"Stack pointer: {sp_name}")
+
+# Link register (if applicable)
+if arch.link_reg:
+    print(f"Link register: {arch.link_reg}")
+
+# Global registers
+for reg in arch.global_regs:
+    print(f"Global: {reg}")
+```
+
+<ParamField path="regs" type="dict[str, RegisterInfo]">
+  Dictionary mapping register names to RegisterInfo objects
+</ParamField>
+
+<ParamField path="stack_pointer" type="str">
+  Name of the stack pointer register
+</ParamField>
+
+<ParamField path="link_reg" type="Optional[str]">
+  Name of the link register (for RISC architectures)
+</ParamField>
+
+### RegisterInfo Class
+
+<ParamField path="name" type="str">
+  Register name
+</ParamField>
+
+<ParamField path="size" type="int">
+  Register size in bytes
+</ParamField>
+
+<ParamField path="offset" type="int">
+  Offset within full-width register
+</ParamField>
+
+<ParamField path="index" type="int">
+  Register index for IL
+</ParamField>
+
+<ParamField path="full_width_reg" type="str">
+  Full-width register this is part of
+</ParamField>
+
+### Flags
+
+Work with CPU flags:
+
+```python
+# Get all flags
+for flag_name in arch.flags:
+    print(flag_name)
+
+# Get flag write types
+for write_type in arch.flag_write_types:
+    print(write_type)
+
+# Get semantic flag classes
+for flag_class in arch.semantic_flag_classes:
+    print(flag_class)
+
+# Get semantic flag groups  
+for flag_group in arch.semantic_flag_groups:
+    print(flag_group)
+```
+
+### Intrinsics
+
+Architecture-specific intrinsic operations:
+
+```python
+# Get all intrinsics
+for intrinsic_name, intrinsic_info in arch.intrinsics.items():
+    print(f"{intrinsic_name}")
+    print(f"  Inputs: {intrinsic_info.inputs}")
+    print(f"  Outputs: {intrinsic_info.outputs}")
+
+# Get specific intrinsic
+intrinsic = arch.intrinsics['_cpuid']
+```
+
+### Instruction Information
+
+Get information about instructions:
+
+```python
+# Get instruction info
+info = arch.get_instruction_info(data, addr)
+
+if info:
+    print(f"Length: {info.length}")
+    print(f"Branch delay: {info.branch_delay}")
+    
+    # Branch targets
+    for branch in info.branches:
+        print(f"Branch to {branch.target:#x} ({branch.type})")
+
+# Get instruction text
+tokens, length = arch.get_instruction_text(data, addr)
+if tokens:
+    instr_text = ''.join(t.text for t in tokens)
+    print(f"{addr:#x}: {instr_text}")
+
+# Get instruction length only
+length = arch.get_instruction_length(data, addr)
+```
+
+<ParamField path="get_instruction_info" type="(data: bytes, addr: int) -> InstructionInfo">
+  Get detailed instruction information
+  
+  <Expandable title="Parameters">
+    <ResponseField name="data" type="bytes" required>
+      Instruction bytes
+    </ResponseField>
+    <ResponseField name="addr" type="int" required>
+      Address of instruction
+    </ResponseField>
+  </Expandable>
+  
+  Returns InstructionInfo with length, branches, etc.
+</ParamField>
+
+### IL Generation
+
+Architectures lift instructions to Low Level IL:
+
+```python
+# This is typically done automatically by Binary Ninja
+# Custom architectures implement this method
+
+class MyArchitecture(Architecture):
+    def get_instruction_low_level_il(self, data, addr, il):
+        # Decode instruction
+        instr = self.decode(data)
+        
+        # Lift to LLIL
+        if instr.operation == 'MOV':
+            il.append(il.set_reg(
+                instr.dst_reg,
+                il.reg(instr.src_reg)
+            ))
+        # ... more operations
+        
+        return instr.length
+```
+
+## Calling Conventions
+
+Access calling conventions for the architecture:
+
+```python
+# Get all calling conventions
+for cc in arch.calling_conventions:
+    print(f"Calling convention: {cc.name}")
+
+# Get default calling convention
+default_cc = arch.calling_conventions[0]
+
+# Get specific calling convention
+cc = arch.get_calling_convention_by_name('cdecl')
+if cc:
+    print(f"Int parameters: {cc.int_arg_regs}")
+    print(f"Return register: {cc.int_return_reg}")
+```
+
+## Standalone Platform
+
+Get a basic platform for the architecture:
+
+```python
+# Standalone platform (no OS-specific settings)
+platform = arch.standalone_platform
+
+print(f"Platform: {platform.name}")
+print(f"Architecture: {platform.arch.name}")
+```
+
+## Custom Architectures
+
+Define new architectures by subclassing:
+
+```python
+from binaryninja import Architecture, RegisterInfo
+from binaryninja.enums import Endianness
+
+class MyArchitecture(Architecture):
+    name = "my_arch"
+    
+    # Required properties
+    address_size = 4
+    default_int_size = 4
+    max_instr_length = 4
+    instr_alignment = 4
+    endianness = Endianness.LittleEndian
+    
+    # Define registers
+    regs = {
+        'r0': RegisterInfo('r0', 4),
+        'r1': RegisterInfo('r1', 4),
+        'r2': RegisterInfo('r2', 4),
+        'r3': RegisterInfo('r3', 4),
+        'sp': RegisterInfo('sp', 4),
+        'lr': RegisterInfo('lr', 4),
+        'pc': RegisterInfo('pc', 4),
+    }
+    
+    stack_pointer = 'sp'
+    link_reg = 'lr'
+    
+    def get_instruction_info(self, data, addr):
+        # Decode and return instruction info
+        pass
+    
+    def get_instruction_text(self, data, addr):
+        # Return disassembly tokens
+        pass
+    
+    def get_instruction_low_level_il(self, data, addr, il):
+        # Lift to LLIL
+        pass
+
+# Register the architecture
+MyArchitecture.register()
+```
+
+## Example: Enumerate Architecture Features
+
+```python
+def enumerate_arch_features(arch_name):
+    """Print all features of an architecture."""
+    arch = Architecture[arch_name]
+    
+    print(f"Architecture: {arch.name}")
+    print(f"  Address size: {arch.address_size} bytes")
+    print(f"  Endianness: {arch.endianness.name}")
+    print(f"  Max instruction: {arch.max_instr_length} bytes")
+    print(f"  Alignment: {arch.instr_alignment}")
+    print(f"  Stack pointer: {arch.stack_pointer}")
+    
+    if arch.link_reg:
+        print(f"  Link register: {arch.link_reg}")
+    
+    print(f"\n  Registers ({len(arch.regs)}):")
+    for name, info in sorted(arch.regs.items()):
+        print(f"    {name}: {info.size} bytes")
+    
+    print(f"\n  Calling conventions ({len(arch.calling_conventions)}):")
+    for cc in arch.calling_conventions:
+        print(f"    {cc.name}")
+    
+    print(f"\n  Intrinsics ({len(arch.intrinsics)}):")
+    for name in sorted(arch.intrinsics.keys())[:10]:
+        print(f"    {name}")
+    if len(arch.intrinsics) > 10:
+        print(f"    ... and {len(arch.intrinsics) - 10} more")
+
+# Usage
+enumerate_arch_features('x86_64')
+```
+
+## Example: Instruction Iterator
+
+```python
+def disassemble_range(bv, start, end):
+    """Disassemble instructions in a range."""
+    arch = bv.arch
+    addr = start
+    
+    while addr < end:
+        data = bv.read(addr, arch.max_instr_length)
+        
+        # Get instruction text
+        tokens, length = arch.get_instruction_text(data, addr)
+        
+        if not tokens or length == 0:
+            print(f"{addr:#x}: <invalid>")
+            addr += 1
+            continue
+        
+        # Format instruction
+        instr_text = ''.join(t.text for t in tokens)
+        print(f"{addr:#x}: {instr_text}")
+        
+        addr += length
+
+# Usage
+disassemble_range(bv, 0x401000, 0x401100)
+```
+
+## See Also
+
+- [Platform API](/api/python/platform) - OS and calling convention info
+- [Function API](/api/python/function) - Function analysis
+- [Low Level IL](/api/python/lowlevelil) - IL representation

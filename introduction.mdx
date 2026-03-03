@@ -1,0 +1,155 @@
+---
+title: Binary Ninja API
+description: Official C++, Python, and Rust API for the Binary Ninja reverse engineering platform
+---
+
+<img
+  className="block dark:hidden"
+  src="https://binary.ninja/images/logo.png"
+  alt="Binary Ninja"
+  width="200"
+/>
+<img
+  className="hidden dark:block"
+  src="https://binary.ninja/images/logo.png"
+  alt="Binary Ninja"
+  width="200"
+/>
+
+# Welcome to Binary Ninja API
+
+The Binary Ninja API provides comprehensive access to Binary Ninja's powerful reverse engineering capabilities through C++, Python, and Rust interfaces. Whether you're building plugins, creating automation scripts, or developing standalone analysis tools, the Binary Ninja API gives you the tools you need.
+
+## Multi-Language Support
+
+Binary Ninja supports three official language bindings, each with their own strengths:
+
+<CardGroup cols={3}>
+  <Card title="Python API" icon="python" href="https://api.binary.ninja/">
+    Perfect for rapid prototyping and scripting. Most popular for plugins.
+  </Card>
+  <Card title="C++ API" icon="code" href="https://api.binary.ninja/cpp/">
+    Native performance for advanced plugins and architectures.
+  </Card>
+  <Card title="Rust API" icon="rust" href="https://rust.binary.ninja/">
+    Type-safe bindings with modern language features.
+  </Card>
+</CardGroup>
+
+## Key Features
+
+### Advanced Intermediate Languages
+
+Binary Ninja's multi-tiered IL system provides unprecedented insight into binary code:
+
+- **LLIL (Low-Level IL)**: Architecture-independent representation close to assembly
+- **MLIL (Medium-Level IL)**: Decompiled representation with data flow analysis
+- **HLIL (High-Level IL)**: High-level C-like representation with SSA form
+
+Each IL level supports SSA (Static Single Assignment) form for advanced analysis.
+
+### Extensive Architecture Support
+
+Built-in support for multiple architectures:
+
+<CardGroup cols={2}>
+  <Card title="x86/x86_64" icon="microchip">
+    Intel and AMD processors
+  </Card>
+  <Card title="ARM64 & ARMv7" icon="microchip">
+    Modern ARM architectures
+  </Card>
+  <Card title="MIPS" icon="microchip">
+    MIPS32 and MIPS64
+  </Card>
+  <Card title="PowerPC" icon="microchip">
+    PowerPC 32 and 64-bit
+  </Card>
+  <Card title="RISC-V" icon="microchip">
+    Open source RISC architecture
+  </Card>
+  <Card title="MSP430" icon="microchip">
+    TI microcontrollers
+  </Card>
+</CardGroup>
+
+### Platform & Binary Format Support
+
+Comprehensive support for:
+
+- **Platforms**: Windows, Linux, macOS, FreeBSD, EFI, and more
+- **Formats**: PE/COFF, ELF, Mach-O, kernel caches, shared caches
+- **Debug Info**: DWARF, PDB, IDB import
+
+### Plugin Development
+
+Extend Binary Ninja with custom:
+
+- **Architectures**: Add support for new CPU architectures
+- **Binary View Types**: Parse new file formats
+- **Workflows**: Customize the analysis pipeline
+- **UI Components**: Create custom views and panels (with UI license)
+- **Analysis Extensions**: Custom function recognizers, type libraries
+
+## Getting Started
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Set up the Binary Ninja API for your language of choice
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Jump right in with working examples in Python, C++, and Rust
+  </Card>
+  <Card title="Python Examples" icon="python" href="https://github.com/Vector35/binaryninja-api/tree/dev/python/examples">
+    Browse dozens of Python examples
+  </Card>
+  <Card title="Rust Examples" icon="rust" href="https://github.com/Vector35/binaryninja-api/tree/dev/rust/examples">
+    Explore Rust example projects
+  </Card>
+</CardGroup>
+
+## License Requirements
+
+<Note>
+The Binary Ninja API requires a valid Binary Ninja license. Some features require specific license types:
+
+- **Personal/Commercial**: Full API access for plugins and UI scripting
+- **Headless**: Required for standalone executables and automation servers
+- **Enterprise**: Additional collaboration and team features
+</Note>
+
+## Open Source
+
+The Binary Ninja API is open source and available on GitHub:
+
+<Card title="Binary Ninja API Repository" icon="github" href="https://github.com/Vector35/binaryninja-api">
+  Contribute to the API or browse the source code
+</Card>
+
+The repository includes:
+- Complete API source code (MIT licensed)
+- All architecture implementations
+- Binary view type implementations
+- Example plugins and projects
+- Documentation source
+
+## Support & Community
+
+<CardGroup cols={2}>
+  <Card title="Slack Community" icon="slack" href="https://slack.binary.ninja/">
+    Join our active community for help and discussion
+  </Card>
+  <Card title="Issue Tracker" icon="github" href="https://github.com/Vector35/binaryninja-api/issues">
+    Report bugs and request features
+  </Card>
+  <Card title="Documentation" icon="book" href="https://docs.binary.ninja/">
+    Official Binary Ninja documentation
+  </Card>
+  <Card title="API Reference" icon="code" href="https://api.binary.ninja/">
+    Complete Python API reference
+  </Card>
+</CardGroup>
+
+## What's Next?
+
+Ready to start building with Binary Ninja? Head over to the [Installation](/installation) guide to set up your development environment, or jump straight into the [Quickstart](/quickstart) to see the API in action.

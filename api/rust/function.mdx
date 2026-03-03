@@ -1,0 +1,162 @@
+---
+title: Functions (Rust)
+description: Rust API for analyzing functions
+---
+
+The `Function` type provides access to function analysis including basic blocks, IL representations, variables, and call graphs.
+
+## Getting functions
+
+```rust
+use binaryninja::binary_view::BinaryViewExt;
+
+// Get all functions
+for func in bv.functions().iter() {
+    println!("{:#x}: {}", func.start(), func.symbol().full_name());
+}
+
+// Get function at specific address
+if let Some(func) = bv.function_at(0x1000) {
+    analyze_function(&func);
+}
+```
+
+## Function properties
+
+```rust
+// Basic info
+let start = func.start();
+let arch = func.arch();
+let platform = func.platform();
+
+// Symbol
+let symbol = func.symbol();
+println!("Name: {}", symbol.full_name());
+
+// Size and instruction count
+println!("Size: {:#x}", func.total_bytes());
+println!("Instructions: {}", func.instruction_count());
+
+// Calling convention
+if let Some(cc) = func.calling_convention() {
+    println!("Calling convention: {}", cc.name());
+}
+```
+
+## Basic blocks
+
+```rust
+// Iterate basic blocks
+for block in func.basic_blocks().iter() {
+    println!("Block {:#x}-{:#x}", block.raw_start(), block.raw_end());
+
+    // Block properties
+    println!("  Instructions: {}", block.instruction_count());
+    println!("  Has undetermined outgoing edges: {}", 
+        block.has_undetermined_outgoing_edges());
+}
+```
+
+## IL access
+
+```rust
+use binaryninja::function::FunctionViewType;
+
+// Get LLIL
+if let Ok(llil) = func.low_level_il() {
+    for block in llil.basic_blocks().iter() {
+        for instr in block.iter() {
+            println!("{:#x}: {:?}", instr.address, instr.kind);
+        }
+    }
+}
+
+// Get MLIL
+if let Ok(mlil) = func.medium_level_il() {
+    for instr in mlil.instructions() {
+        println!("{:?}", instr);
+    }
+}
+
+// Get HLIL
+if let Ok(hlil) = func.high_level_il() {
+    for instr in hlil.instructions() {
+        println!("{:?}", instr);
+    }
+}
+```
+
+## Variables
+
+```rust
+// Get function variables
+for var in func.variables() {
+    println!("Variable: {} (type: {:?})", var.name(), var.var_type());
+}
+
+// Stack variables
+for var in func.stack_variables() {
+    println!("Stack var at offset {}: {}", var.storage(), var.name());
+}
+```
+
+## Call graph
+
+```rust
+// Callers
+for caller in func.callers() {
+    println!("Called by: {}", caller.symbol().full_name());
+}
+
+// Callees
+for callee in func.callees() {
+    println!("Calls: {}", callee.symbol().full_name());
+}
+
+// Call sites
+for site in func.call_sites() {
+    println!("Call at {:#x}", site.addr);
+}
+```
+
+## Complete example
+
+```rust
+use binaryninja::headless::Session;
+use binaryninja::binary_view::BinaryViewExt;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let session = Session::new()?;
+    let bv = session.load("/bin/ls")?;
+
+    // Analyze first 5 functions
+    for func in bv.functions().iter().take(5) {
+        println!("\n=== {} ===", func.symbol().full_name());
+        println!("Address: {:#x}", func.start());
+        println!("Size: {:#x} bytes", func.total_bytes());
+        println!("Basic blocks: {}", func.basic_blocks().len());
+
+        // Callees
+        let callees: Vec<_> = func.callees().collect();
+        if !callees.is_empty() {
+            println!("Calls {} functions:", callees.len());
+            for callee in callees.iter().take(5) {
+                println!("  - {}", callee.symbol().full_name());
+            }
+        }
+    }
+
+    Ok(())
+}
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="IL" href="/api/rust/il">
+    Work with intermediate languages
+  </Card>
+  <Card title="Architecture" href="/api/rust/architecture">
+    Architecture APIs
+  </Card>
+</CardGroup>

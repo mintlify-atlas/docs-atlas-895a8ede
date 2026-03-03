@@ -1,0 +1,403 @@
+---
+title: Architectures
+description: Understanding CPU architectures and instruction sets in Binary Ninja
+---
+
+## Overview
+
+The **Architecture** class in Binary Ninja represents CPU architectures and instruction sets. It handles instruction disassembly, lifting to IL, register information, calling conventions, and architecture-specific semantics.
+
+<Info>
+Binary Ninja supports multiple architectures out of the box, and you can create custom architecture plugins to add support for new instruction sets.
+</Info>
+
+## Built-in Architectures
+
+Binary Ninja includes native support for:
+
+- **x86** / **x86_64** - Intel/AMD 32-bit and 64-bit
+- **ARM64** - ARMv8 64-bit (AArch64)
+- **ARMv7** - ARM 32-bit with Thumb support
+- **PPC** - PowerPC 32-bit and 64-bit
+- **MIPS** - MIPS 32-bit and 64-bit
+- **RISC-V** - RISC-V 32-bit and 64-bit
+- **MSP430** - Texas Instruments MSP430
+
+Each architecture is maintained in the [Binary Ninja API repository](https://github.com/Vector35/binaryninja-api/tree/dev/arch).
+
+## Accessing Architectures
+
+### Getting Architecture from BinaryView
+
+```python
+import binaryninja
+from binaryninja import load
+
+# Load a binary
+bv = load("/path/to/binary")
+
+# Get the architecture
+arch = bv.arch
+print(f"Architecture: {arch.name}")  # e.g., "x86_64", "aarch64"
+```
+
+### Listing Available Architectures
+
+```python
+from binaryninja import Architecture
+
+# Get all registered architectures
+for arch_name in Architecture:
+    arch = Architecture[arch_name]
+    print(f"{arch.name}: {arch.full_name}")
+```
+
+### Getting Architecture by Name
+
+```python
+from binaryninja import Architecture
+
+# Get specific architecture
+arch = Architecture['x86_64']
+arch = Architecture['aarch64']
+arch = Architecture['mips32']
+```
+
+## Architecture Properties
+
+### Basic Information
+
+```python
+# Name and description
+print(f"Name: {arch.name}")
+print(f"Full name: {arch.full_name}")
+
+# Addressing
+print(f"Address size: {arch.address_size} bytes")
+print(f"Default integer size: {arch.default_int_size} bytes")
+print(f"Max instruction length: {arch.max_instr_length} bytes")
+
+# Endianness
+from binaryninja.enums import Endianness
+if arch.endianness == Endianness.LittleEndian:
+    print("Little endian")
+else:
+    print("Big endian")
+```
+
+### Instruction Alignment
+
+```python
+# Get instruction alignment
+alignment = arch.instr_alignment
+print(f"Instructions must be aligned to {alignment} bytes")
+
+# Some architectures have opcode display length
+opcode_len = arch.opcode_display_length
+print(f"Opcode display length: {opcode_len}")
+```
+
+## Registers
+
+### Accessing Register Information
+
+```python
+# Get all registers
+for reg_name, reg_info in arch.regs.items():
+    print(f"{reg_name}: {reg_info.size} bytes")
+    print(f"  Full width: {reg_info.full_width_reg}")
+    print(f"  Offset: {reg_info.offset}")
+
+# Get specific register
+rax_info = arch.regs['rax']  # x86_64
+print(f"RAX size: {rax_info.size} bytes")
+```
+
+### Stack Pointer and Register Roles
+
+```python
+# Get stack pointer register
+stack_ptr = arch.stack_pointer
+print(f"Stack pointer: {stack_ptr}")
+
+# Get link register (for architectures that have one)
+if hasattr(arch, 'link_reg'):
+    print(f"Link register: {arch.link_reg}")
+
+# Global pointer (MIPS, RISC-V)
+if hasattr(arch, 'global_pointer'):
+    print(f"Global pointer: {arch.global_pointer}")
+```
+
+### Register Stacks
+
+Some architectures (like x86 with the FPU) use register stacks:
+
+```python
+# Get register stacks
+for stack_name, stack_info in arch.reg_stacks.items():
+    print(f"Register stack: {stack_name}")
+    print(f"  Storage registers: {stack_info.storage_regs}")
+    print(f"  Top relative: {stack_info.top_relative_regs}")
+```
+
+## Flags
+
+Flags represent condition codes and status bits:
+
+```python
+# Get all flags
+for flag_name in arch.flags:
+    flag_index = arch.get_flag_index(flag_name)
+    print(f"Flag: {flag_name} (index {flag_index})")
+
+# Flag write types (groups of flags written together)
+for write_type in arch.flag_write_types:
+    print(f"Flag write type: {write_type}")
+
+# Semantic flag classes (e.g., "zero", "negative", "carry")
+for class_name in arch.semantic_flag_classes:
+    print(f"Semantic flag class: {class_name}")
+
+# Semantic flag groups
+for group_name in arch.semantic_flag_groups:
+    print(f"Semantic flag group: {group_name}")
+```
+
+## Disassembly
+
+### Getting Instruction Information
+
+```python
+from binaryninja import InstructionInfo
+
+# Get instruction at address
+info = arch.get_instruction_info(data, addr)
+if info:
+    print(f"Length: {info.length}")
+    print(f"Branches: {len(info.branches)}")
+    for branch in info.branches:
+        print(f"  Branch to: 0x{branch.target:x}, type: {branch.type}")
+
+# Get instruction text
+text_tokens, length = arch.get_instruction_text(data, addr)
+for token in text_tokens:
+    print(token, end="")
+print()
+```
+
+### Instruction Low-Level IL
+
+```python
+# Get IL for instruction
+from binaryninja import LowLevelILFunction
+
+# This is typically done within the architecture plugin
+# or when analyzing functions
+func = bv.get_function_at(addr)
+llil = func.low_level_il
+for instr in llil:
+    print(instr)
+```
+
+## Calling Conventions
+
+### Getting Calling Conventions
+
+```python
+# Get all calling conventions for this architecture
+for cc_name, cc in arch.calling_conventions.items():
+    print(f"Calling convention: {cc_name}")
+    print(f"  Int args: {cc.int_arg_regs}")
+    print(f"  Return: {cc.int_return_reg}")
+    print(f"  Callee saved: {cc.callee_saved_regs}")
+
+# Get default calling convention
+default_cc = arch.default_calling_convention
+print(f"Default: {default_cc.name}")
+```
+
+### Calling Convention Details
+
+```python
+# Get specific calling convention
+cc = arch.calling_conventions['cdecl']  # x86
+# or
+cc = arch.calling_conventions['sysv']   # x86_64
+
+# Integer argument registers
+for i, reg in enumerate(cc.int_arg_regs):
+    print(f"Int arg {i}: {reg}")
+
+# Float argument registers  
+for i, reg in enumerate(cc.float_arg_regs):
+    print(f"Float arg {i}: {reg}")
+
+# Return registers
+print(f"Int return: {cc.int_return_reg}")
+print(f"High int return: {cc.high_int_return_reg}")  # For 64-bit returns on 32-bit
+
+# Caller/callee saved
+print(f"Caller saved: {cc.caller_saved_regs}")
+print(f"Callee saved: {cc.callee_saved_regs}")
+
+# Stack behavior
+print(f"Reserved stack space: {cc.reserved_stack_space}")
+print(f"Arg registers shared index: {cc.arg_registers_shared_index}")
+```
+
+## Intrinsics
+
+Intrinsics represent architecture-specific operations:
+
+```python
+# Get all intrinsics
+for intrinsic_name, intrinsic_info in arch.intrinsics.items():
+    print(f"Intrinsic: {intrinsic_name}")
+    print(f"  Inputs: {intrinsic_info.inputs}")
+    print(f"  Outputs: {intrinsic_info.outputs}")
+
+# Get intrinsic by name
+intrinsic = arch.get_intrinsic_name(intrinsic_index)
+```
+
+## Assembly and Disassembly
+
+### Assemble Instructions
+
+```python
+# Assemble instruction to bytes
+result = arch.assemble("mov rax, 0x1234", addr)
+if result:
+    print(f"Assembled: {result.hex()}")
+```
+
+### Always Disassemble
+
+```python
+# Check if architecture always disassembles
+if arch.always_branch:
+    print("This architecture always branches")
+```
+
+## Practical Examples
+
+### Example 1: Listing Register Information
+
+```python
+import binaryninja
+from binaryninja import Architecture
+
+def print_register_info(arch_name):
+    arch = Architecture[arch_name]
+    print(f"\n=== {arch.full_name} ===")
+    print(f"Address size: {arch.address_size} bytes")
+    print(f"Stack pointer: {arch.stack_pointer}")
+    
+    print("\nRegisters:")
+    for reg_name, reg_info in arch.regs.items():
+        print(f"  {reg_name:8} - {reg_info.size} bytes")
+
+print_register_info('x86_64')
+print_register_info('aarch64')
+```
+
+### Example 2: Analyzing Calling Conventions
+
+```python
+def analyze_calling_convention(arch_name, cc_name):
+    arch = Architecture[arch_name]
+    cc = arch.calling_conventions.get(cc_name)
+    
+    if not cc:
+        print(f"Calling convention '{cc_name}' not found")
+        return
+    
+    print(f"\n=== {arch.name} - {cc.name} ===")
+    print(f"\nInteger argument registers:")
+    for i, reg in enumerate(cc.int_arg_regs):
+        print(f"  Arg {i}: {reg}")
+    
+    print(f"\nInteger return register: {cc.int_return_reg}")
+    
+    print(f"\nCallee-saved registers:")
+    for reg in cc.callee_saved_regs:
+        print(f"  {reg}")
+
+analyze_calling_convention('x86_64', 'sysv')
+analyze_calling_convention('aarch64', 'cdecl')
+```
+
+### Example 3: Disassembling Instructions
+
+```python
+def disassemble_range(bv, start, count):
+    arch = bv.arch
+    addr = start
+    
+    for i in range(count):
+        data = bv.read(addr, arch.max_instr_length)
+        tokens, length = arch.get_instruction_text(data, addr)
+        
+        # Print address and instruction
+        instr_text = "".join(str(t) for t in tokens)
+        print(f"0x{addr:08x}:  {instr_text}")
+        
+        addr += length
+        if length == 0:
+            break
+
+bv = load("/path/to/binary")
+disassemble_range(bv, bv.entry_point, 10)
+```
+
+## Creating Custom Architectures
+
+<Accordion title="Advanced: Custom Architecture Plugin">
+
+To create a custom architecture, you need to subclass `Architecture` and implement required methods:
+
+```python
+from binaryninja import Architecture, RegisterInfo
+from binaryninja.enums import Endianness, BranchType
+
+class MyArch(Architecture):
+    name = "myarch"
+    address_size = 4
+    default_int_size = 4
+    instr_alignment = 4
+    max_instr_length = 4
+    
+    regs = {
+        'r0': RegisterInfo('r0', 4),
+        'r1': RegisterInfo('r1', 4),
+        # ... more registers
+    }
+    
+    stack_pointer = 'sp'
+    
+    def get_instruction_info(self, data, addr):
+        # Parse instruction and return info
+        pass
+    
+    def get_instruction_text(self, data, addr):
+        # Return disassembly tokens
+        pass
+    
+    def get_instruction_low_level_il(self, data, addr, il):
+        # Lift instruction to LLIL
+        pass
+
+# Register the architecture
+MyArch.register()
+```
+
+For complete examples, see the [architecture implementations](https://github.com/Vector35/binaryninja-api/tree/dev/arch) in the Binary Ninja API repository.
+</Accordion>
+
+## Related Concepts
+
+- [Binary Views](./binary-views) - Binary file representation
+- [Intermediate Languages](./intermediate-languages) - IL representations
+- [Functions](./functions) - Function analysis
+- [Types](./types) - Type system

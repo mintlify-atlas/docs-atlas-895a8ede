@@ -1,0 +1,340 @@
+---
+title: Binary View Loader
+description: Learn how to create custom binary view loaders for non-standard file formats
+---
+
+This example demonstrates how to create a custom BinaryView to support loading and analyzing non-standard file formats, specifically Nintendo DS ROM files.
+
+## Overview
+
+The `nds.py` example shows how to:
+- Create a custom BinaryView subclass for proprietary formats
+- Implement format validation logic
+- Parse custom file headers and extract metadata
+- Define memory segments and entry points
+- Support multiple views of the same file (ARM7 and ARM9 processors)
+
+## Complete Source Code
+
+```python
+from binaryninja.binaryview import BinaryView
+from binaryninja.architecture import Architecture
+from binaryninja.enums import SegmentFlag
+from binaryninja.log import log_error
+
+import struct
+import traceback
+
+
+def crc16(data):
+    crc = 0xffff
+    for ch in data:
+        crc ^= ord(ch)
+        for bit in range(0, 8):
+            if (crc & 1) == 1:
+                crc = (crc >> 1) ^ 0xa001
+            else:
+                crc >>= 1
+    return crc
+
+
+class DSView(BinaryView):
+    def __init__(self, data):
+        BinaryView.__init__(self, file_metadata=data.file, parent_view=data)
+        self.raw = data
+
+    @staticmethod
+    def is_valid_for_data(data):
+        hdr = data.read(0, 0x160)
+        if len(hdr) < 0x160:
+            return False
+        if struct.unpack("<H", hdr[0x15e:0x160])[0] != crc16(hdr[0:0x15e]):
+            return False
+        if struct.unpack("<H", hdr[0x15c:0x15e])[0] != crc16(hdr[0xc0:0x15c]):
+            return False
+        return True
+
+    def init_common(self):
+        self.platform = Architecture["armv7"].standalone_platform
+        self.hdr = self.raw.read(0, 0x160)
+
+    def init_arm9(self):
+        try:
+            self.init_common()
+            self.arm9_offset = struct.unpack("<L", self.hdr[0x20:0x24])[0]
+            self.arm_entry_addr = struct.unpack("<L", self.hdr[0x24:0x28])[0]
+            self.arm9_load_addr = struct.unpack("<L", self.hdr[0x28:0x2C])[0]
+            self.arm9_size = struct.unpack("<L", self.hdr[0x2C:0x30])[0]
+            self.add_auto_segment(
+              self.arm9_load_addr, self.arm9_size, self.arm9_offset, self.arm9_size,
+              SegmentFlag.SegmentReadable | SegmentFlag.SegmentExecutable
+            )
+            self.add_entry_point(Architecture['armv7'].standalone_platform, self.arm_entry_addr)
+            return True
+        except:
+            log_error(traceback.format_exc())
+            return False
+
+    def init_arm7(self):
+        try:
+            self.init_common()
+            self.arm7_offset = struct.unpack("<L", self.hdr[0x30:0x34])[0]
+            self.arm_entry_addr = struct.unpack("<L", self.hdr[0x34:0x38])[0]
+            self.arm7_load_addr = struct.unpack("<L", self.hdr[0x38:0x3C])[0]
+            self.arm7_size = struct.unpack("<L", self.hdr[0x3C:0x40])[0]
+            self.add_auto_segment(
+              self.arm7_load_addr, self.arm7_size, self.arm7_offset, self.arm7_size,
+              SegmentFlag.SegmentReadable | SegmentFlag.SegmentExecutable
+            )
+            self.add_entry_point(Architecture['armv7'].standalone_platform, self.arm_entry_addr)
+            return True
+        except:
+            log_error(traceback.format_exc())
+            return False
+
+    def perform_is_executable(self):
+        return True
+
+    def perform_get_entry_point(self):
+        return self.arm_entry_addr
+
+
+class DSARM9View(DSView):
+    name = "DSARM9"
+    long_name = "DS ARM9 ROM"
+
+    def init(self):
+        return self.init_arm9()
+
+
+class DSARM7View(DSView):
+    name = "DSARM7"
+    long_name = "DS ARM7 ROM"
+
+    def init(self):
+        return self.init_arm7()
+
+
+DSARM9View.register()
+DSARM7View.register()
+```
+
+## Key Concepts Explained
+
+<Steps>
+
+### Extend BinaryView
+
+```python
+class DSView(BinaryView):
+    def __init__(self, data):
+        BinaryView.__init__(self, file_metadata=data.file, parent_view=data)
+        self.raw = data
+```
+
+Create a custom BinaryView subclass:
+- Call parent `__init__` with `file_metadata` and `parent_view`
+- Store reference to raw data for reading file contents
+- This provides the foundation for custom file format support
+
+### Implement Format Validation
+
+```python
+@staticmethod
+def is_valid_for_data(data):
+    hdr = data.read(0, 0x160)
+    if len(hdr) < 0x160:
+        return False
+    if struct.unpack("<H", hdr[0x15e:0x160])[0] != crc16(hdr[0:0x15e]):
+        return False
+    if struct.unpack("<H", hdr[0x15c:0x15e])[0] != crc16(hdr[0xc0:0x15c]):
+        return False
+    return True
+```
+
+**Critical:** The `is_valid_for_data` static method determines if a file matches your format:
+- Read minimal data needed to identify the format
+- Perform quick validation checks (magic bytes, checksums, etc.)
+- Return `True` if format matches, `False` otherwise
+- Binary Ninja calls this on all registered views to find the right loader
+
+### Parse File Headers
+
+```python
+def init_common(self):
+    self.platform = Architecture["armv7"].standalone_platform
+    self.hdr = self.raw.read(0, 0x160)
+
+def init_arm9(self):
+    self.init_common()
+    self.arm9_offset = struct.unpack("<L", self.hdr[0x20:0x24])[0]
+    self.arm_entry_addr = struct.unpack("<L", self.hdr[0x24:0x28])[0]
+    self.arm9_load_addr = struct.unpack("<L", self.hdr[0x28:0x2C])[0]
+    self.arm9_size = struct.unpack("<L", self.hdr[0x2C:0x30])[0]
+```
+
+Extract format-specific metadata:
+- Read header data from the parent view (`self.raw`)
+- Use `struct.unpack` to parse binary structures
+- Extract addresses, sizes, and offsets for segments
+
+### Define Memory Segments
+
+```python
+self.add_auto_segment(
+    self.arm9_load_addr,    # Virtual address where segment loads
+    self.arm9_size,         # Size in virtual memory
+    self.arm9_offset,       # Offset in file
+    self.arm9_size,         # Size in file
+    SegmentFlag.SegmentReadable | SegmentFlag.SegmentExecutable
+)
+```
+
+Segments define the memory layout:
+- **Virtual address** - Where the segment appears in the address space
+- **Virtual size** - Size in memory (can differ from file size for BSS)
+- **File offset** - Where to read data from in the raw file
+- **File size** - How much data to read
+- **Flags** - Permissions (readable, writable, executable)
+
+### Set Entry Points
+
+```python
+self.add_entry_point(Architecture['armv7'].standalone_platform, self.arm_entry_addr)
+```
+
+Define where analysis should start:
+- Specify the platform (architecture + OS/ABI)
+- Provide the entry point address
+- Analysis will automatically begin from this address
+
+### Support Multiple Views
+
+```python
+class DSARM9View(DSView):
+    name = "DSARM9"
+    long_name = "DS ARM9 ROM"
+    
+    def init(self):
+        return self.init_arm9()
+
+class DSARM7View(DSView):
+    name = "DSARM7"
+    long_name = "DS ARM7 ROM"
+    
+    def init(self):
+        return self.init_arm7()
+```
+
+Create multiple views for different perspectives:
+- Nintendo DS has two processors (ARM7 and ARM9)
+- Each view class provides a different analysis perspective
+- Users can switch between views in the UI
+
+### Register the Views
+
+```python
+DSARM9View.register()
+DSARM7View.register()
+```
+
+Register your views to make them available:
+- Call `.register()` on each view class
+- Binary Ninja will now recognize files matching your format
+- Views appear in the UI when opening compatible files
+
+</Steps>
+
+## Required Methods to Override
+
+### Validation
+- `is_valid_for_data(data)` - **Required** - Detect if file matches your format
+
+### Initialization
+- `init()` - **Required** - Parse headers and set up the view (return `True` on success)
+
+### Properties
+- `perform_is_executable()` - Return `True` if the file is executable code
+- `perform_get_entry_point()` - Return the entry point address
+
+### Class Attributes
+- `name` - **Required** - Short name for the view type
+- `long_name` - Descriptive name shown in UI
+
+## Loading Custom Formats
+
+### As a Plugin
+
+Save to your plugins directory:
+```
+~/.binaryninja/plugins/nds.py
+```
+
+### In a Script
+
+```python
+import binaryninja
+from nds import DSARM9View, DSARM7View
+
+# Views are registered on import
+bv = binaryninja.load("game.nds")
+print(f"Loaded as: {bv.view_type}")  # Will show "DSARM9" or "DSARM7"
+```
+
+## Expected Behavior
+
+When opening a Nintendo DS ROM:
+
+1. Binary Ninja detects the format using `is_valid_for_data`
+2. Both DSARM9 and DSARM7 views are available
+3. User selects which processor to analyze
+4. View initializes, parsing the header and creating segments
+5. Analysis begins at the detected entry point
+
+## Advanced BinaryView Features
+
+### Define Sections
+
+```python
+self.add_auto_section(
+    ".text",                    # Section name
+    self.code_start,            # Start address
+    self.code_size,             # Size
+    SectionSemantics.ReadOnlyCodeSectionSemantics
+)
+```
+
+### Add Symbols
+
+```python
+from binaryninja.types import Symbol
+from binaryninja.enums import SymbolType
+
+self.define_auto_symbol(Symbol(
+    SymbolType.FunctionSymbol,
+    addr,
+    "_start"
+))
+```
+
+### Custom Relocation Handling
+
+```python
+def perform_get_relocation_ranges(self):
+    # Return list of (start, end) tuples for relocation data
+    return [(self.reloc_start, self.reloc_end)]
+```
+
+## Use Cases
+
+- **Proprietary Formats** - Game console ROMs, firmware images
+- **Embedded Systems** - Custom bootloaders and firmware
+- **Virtual Machines** - Bytecode formats and VM images
+- **Archive Analysis** - Executable archives with custom packing
+- **Research** - Experimental or undocumented formats
+
+## Related Examples
+
+- [Architecture Hook](/examples/architecture-hook) - Customize architecture behavior
+- [Workflow Extension](/examples/workflow-extension) - Custom analysis passes
+- [Basic Analysis](/examples/basic-analysis) - Working with loaded binaries

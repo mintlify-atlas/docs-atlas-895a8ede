@@ -1,0 +1,309 @@
+---
+title: Rust API overview
+description: Official Rust bindings for Binary Ninja
+---
+
+The Binary Ninja Rust API provides safe, idiomatic Rust bindings for the Binary Ninja core. It's actively developed and used for production plugins.
+
+<Warning>
+  The Rust API is under active development. Compatibility may break between versions. Pin to a specific commit in production.
+</Warning>
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Type safety" icon="shield">
+    Leverage Rust's type system for safer binary analysis
+  </Card>
+  <Card title="Memory safety" icon="lock">
+    Automatic memory management with reference counting
+  </Card>
+  <Card title="Performance" icon="bolt">
+    Zero-cost abstractions over the C++ core
+  </Card>
+  <Card title="Headless support" icon="server">
+    Full headless automation capabilities
+  </Card>
+</CardGroup>
+
+## Installation
+
+### Requirements
+
+- Binary Ninja installed with a registered license
+- Headless license for standalone executables
+- Clang (for building)
+- Rust toolchain
+
+### Adding to your project
+
+<Steps>
+  <Step title="Add dependencies">
+    Add to your `Cargo.toml`:
+
+    ```toml Cargo.toml
+    [dependencies]
+    binaryninja = { git = "https://github.com/Vector35/binaryninja-api.git", branch = "dev" }
+    binaryninjacore-sys = { git = "https://github.com/Vector35/binaryninja-api.git", branch = "dev" }
+    ```
+
+    <Info>
+      Pin to a specific commit for production use:
+      ```toml
+      binaryninja = { git = "...", rev = "abc123" }
+      ```
+    </Info>
+  </Step>
+
+  <Step title="Create build.rs">
+    Create `build.rs` to link Binary Ninja core:
+
+    ```rust build.rs
+    fn main() {
+        let link_path = std::env::var_os("DEP_BINARYNINJACORE_PATH")
+            .expect("DEP_BINARYNINJACORE_PATH not specified");
+
+        println!("cargo::rustc-link-lib=dylib=binaryninjacore");
+        println!("cargo::rustc-link-search={}", link_path.to_str().unwrap());
+
+        #[cfg(target_os = "linux")]
+        {
+            println!(
+                "cargo::rustc-link-arg=-Wl,-rpath,{0},-L{0}",
+                link_path.to_string_lossy()
+            );
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let crate_name = std::env::var("CARGO_PKG_NAME")
+                .expect("CARGO_PKG_NAME not set");
+            let lib_name = crate_name.replace('-', "_");
+            println!(
+                "cargo::rustc-link-arg=-Wl,-install_name,@rpath/lib{}.dylib",
+                lib_name
+            );
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Write code">
+    Start using the API:
+
+    ```rust main.rs
+    use binaryninja::headless::Session;
+    use binaryninja::binary_view::{BinaryViewBase, BinaryViewExt};
+
+    fn main() {
+        let session = Session::new()
+            .expect("Failed to initialize Binary Ninja");
+
+        let bv = session.load("/bin/ls")
+            .expect("Failed to open binary");
+
+        println!("Functions: {}", bv.functions().len());
+        // Session automatically shuts down when dropped
+    }
+    ```
+  </Step>
+</Steps>
+
+## Quick example
+
+```rust simple.rs
+use binaryninja::headless::Session;
+use binaryninja::binary_view::{BinaryViewBase, BinaryViewExt};
+
+fn main() {
+    let session = Session::new().expect("Failed to initialize session");
+    let bv = session.load("/bin/cat").expect("Couldn't open `/bin/cat`");
+
+    println!("File: `{}`", bv.file().filename());
+    println!("File size: `{:#x}`", bv.len());
+    println!("Function count: {}", bv.functions().len());
+
+    for func in &bv.functions() {
+        println!("{:#x}: {}", func.start(), func.symbol().full_name());
+    }
+}
+```
+
+From [`rust/examples/simple.rs`](https://github.com/Vector35/binaryninja-api/blob/dev/rust/examples/simple.rs)
+
+## Writing plugins
+
+Rust plugins are dynamic libraries loaded by Binary Ninja:
+
+<Steps>
+  <Step title="Configure as cdylib">
+    In `Cargo.toml`:
+
+    ```toml
+    [lib]
+    crate-type = ["cdylib"]
+    ```
+  </Step>
+
+  <Step title="Implement CorePluginInit">
+    ```rust lib.rs
+    use binaryninja::command::Command;
+
+    struct MyCommand;
+
+    impl Command for MyCommand {
+        fn name(&self) -> &'static str {
+            "My Plugin"
+        }
+
+        fn description(&self) -> &'static str {
+            "Does something cool"
+        }
+
+        fn action(&self, view: &binaryninja::binary_view::BinaryView) {
+            println!("Plugin running on {}", view.file().filename());
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn CorePluginInit() -> bool {
+        binaryninja::command::register(
+            "My Plugin",
+            "Description",
+            MyCommand
+        );
+        true
+    }
+    ```
+  </Step>
+
+  <Step title="Build and install">
+    ```bash
+    cargo build --release
+    cp target/release/libmyplugin.so ~/.binaryninja/plugins/
+    ```
+  </Step>
+</Steps>
+
+## Logging
+
+Use the `tracing` crate for logging:
+
+```rust
+use binaryninja::tracing_init;
+use tracing::{info, warn, error};
+
+#[no_mangle]
+pub extern "C" fn CorePluginInit() -> bool {
+    // Initialize tracing subscriber
+    tracing_init!();
+
+    info!("Plugin initialized");
+    warn!("This is a warning");
+    error!("This is an error");
+
+    true
+}
+```
+
+<Note>
+  Call `tracing_init!()` at the start of `CorePluginInit()` to enable logging.
+</Note>
+
+## Memory management
+
+The Rust API uses `Ref<T>` smart pointers that automatically manage reference counts:
+
+```rust
+use binaryninja::rc::Ref;
+use binaryninja::binary_view::BinaryView;
+
+// Ref automatically increments/decrements reference count
+fn process_view(bv: &Ref<BinaryView>) {
+    // Use bv
+    println!("Processing {}", bv.file().filename());
+} // bv reference count decremented here
+```
+
+## Error handling
+
+Most operations return `Result` types:
+
+```rust
+use binaryninja::binary_view::BinaryViewExt;
+
+match session.load("/path/to/binary") {
+    Ok(bv) => {
+        // Successfully loaded
+        analyze_binary(&bv);
+    }
+    Err(_) => {
+        eprintln!("Failed to load binary");
+    }
+}
+```
+
+## Type system
+
+The Rust API provides type-safe access to Binary Ninja types:
+
+```rust
+use binaryninja::types::{Type, Conf};
+
+// Create types
+let int_type = Type::int(4, false);  // 32-bit signed int
+let ptr_type = Type::pointer(&arch, &int_type);  // int32_t*
+
+// Types with confidence
+let conf_type = Conf::new(int_type, 255);  // Maximum confidence
+```
+
+## Module organization
+
+The Rust API is organized into modules:
+
+- `binary_view` - Binary views and file access
+- `architecture` - CPU architectures
+- `function` - Functions and analysis
+- `low_level_il`, `medium_level_il`, `high_level_il` - IL representations
+- `types` - Type system
+- `platform` - Platform definitions
+- `settings` - Configuration
+- `headless` - Headless initialization
+
+## Examples
+
+Complete examples are available:
+
+- **Simple analysis**: [`rust/examples/simple.rs`](https://github.com/Vector35/binaryninja-api/blob/dev/rust/examples/simple.rs)
+- **Disassembly**: [`rust/examples/disassemble.rs`](https://github.com/Vector35/binaryninja-api/blob/dev/rust/examples/disassemble.rs)
+- **Decompilation**: [`rust/examples/decompile.rs`](https://github.com/Vector35/binaryninja-api/blob/dev/rust/examples/decompile.rs)
+- **IL analysis**: [`rust/examples/high_level_il.rs`](https://github.com/Vector35/binaryninja-api/blob/dev/rust/examples/high_level_il.rs)
+- **Type libraries**: [`rust/examples/create_type_library.rs`](https://github.com/Vector35/binaryninja-api/blob/dev/rust/examples/create_type_library.rs)
+
+## API documentation
+
+Generate offline documentation:
+
+```bash
+git clone https://github.com/Vector35/binaryninja-api
+cd binaryninja-api
+cargo doc --no-deps --open -p binaryninja
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Binary view" href="/api/rust/binary-view">
+    Work with binary files
+  </Card>
+  <Card title="Functions" href="/api/rust/function">
+    Analyze functions
+  </Card>
+  <Card title="Headless" href="/api/rust/headless">
+    Automation and scripting
+  </Card>
+  <Card title="Examples" href="/examples/headless-automation">
+    See complete examples
+  </Card>
+</CardGroup>

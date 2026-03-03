@@ -1,0 +1,324 @@
+---
+title: Binary view (Rust)
+description: Rust API for working with binary files
+---
+
+The `BinaryView` is the primary interface for analyzing binary files in Rust. It provides access to the file's contents, functions, symbols, and analysis results.
+
+## Traits
+
+The Rust API uses traits to define BinaryView capabilities:
+
+### `BinaryViewBase`
+
+Core read/write operations:
+
+```rust
+pub trait BinaryViewBase: AsRef<BinaryView> {
+    fn read(&self, buf: &mut [u8], offset: u64) -> usize;
+    fn write(&self, offset: u64, data: &[u8]) -> usize;
+    fn insert(&self, offset: u64, data: &[u8]) -> usize;
+    fn remove(&self, offset: u64, len: usize) -> usize;
+    fn offset_valid(&self, offset: u64) -> bool;
+    fn len(&self) -> usize;
+}
+```
+
+From [`rust/src/binary_view.rs`](https://github.com/Vector35/binaryninja-api/blob/dev/rust/src/binary_view.rs)
+
+### `BinaryViewExt`
+
+Extended functionality for analysis:
+
+```rust
+pub trait BinaryViewExt: BinaryViewBase {
+    fn file(&self) -> Ref<FileMetadata>;
+    fn functions(&self) -> Array<Function>;
+    fn arch(&self) -> CoreArchitecture;
+    fn platform(&self) -> Ref<Platform>;
+    fn symbols(&self) -> Array<Symbol>;
+    fn sections(&self) -> Array<Section>;
+    fn segments(&self) -> Array<Segment>;
+}
+```
+
+## Loading binaries
+
+### Using Session
+
+The recommended way to load binaries:
+
+```rust
+use binaryninja::headless::Session;
+use binaryninja::binary_view::BinaryViewExt;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let session = Session::new()?;
+
+    // Load binary (auto-detect format)
+    let bv = session.load("/bin/ls")?;
+
+    println!("Loaded: {}", bv.file().filename());
+    Ok(())
+}
+```
+
+### Opening specific views
+
+```rust
+use binaryninja::binary_view::BinaryViewType;
+
+// Open raw view
+let raw = BinaryViewType::by_name("Raw")
+    .open("/path/to/file")?;
+
+// Open ELF view
+let elf = BinaryViewType::by_name("ELF")
+    .open("/path/to/elf")?;
+```
+
+## Reading data
+
+### Reading bytes
+
+```rust
+use binaryninja::binary_view::BinaryViewBase;
+
+let mut buffer = [0u8; 16];
+let bytes_read = bv.read(&mut buffer, 0x1000);
+
+println!("Read {} bytes: {:?}", bytes_read, &buffer[..bytes_read]);
+```
+
+### Reading typed data
+
+```rust
+// Read u32 at address
+let value: u32 = bv.read_u32(0x1000)?;
+
+// Read u64
+let addr: u64 = bv.read_u64(0x2000)?;
+
+// Read null-terminated string
+let string = bv.read_c_string(0x3000)?;
+```
+
+## File properties
+
+```rust
+use binaryninja::binary_view::{BinaryViewBase, BinaryViewExt};
+
+// File metadata
+let file = bv.file();
+println!("Filename: {}", file.filename());
+println!("File path: {:?}", file.original_filename());
+
+// Size
+println!("Size: {:#x} bytes", bv.len());
+
+// Entry point
+if let Some(entry) = bv.entry_point() {
+    println!("Entry: {:#x}", entry);
+}
+
+// Architecture and platform
+println!("Architecture: {}", bv.arch().name());
+println!("Platform: {}", bv.platform().name());
+```
+
+## Functions
+
+### Accessing functions
+
+```rust
+use binaryninja::binary_view::BinaryViewExt;
+
+// Get all functions
+for func in bv.functions().iter() {
+    println!("{:#x}: {}", func.start(), func.symbol().full_name());
+}
+
+// Get function at address
+if let Some(func) = bv.function_at(0x1000) {
+    println!("Found function: {}", func.symbol().full_name());
+}
+
+// Get functions containing address
+for func in bv.functions_containing(0x1500) {
+    println!("Contains address: {}", func.symbol().full_name());
+}
+```
+
+### Function count
+
+```rust
+let total = bv.functions().len();
+println!("Total functions: {}", total);
+```
+
+## Symbols
+
+### Listing symbols
+
+```rust
+use binaryninja::symbol::SymbolType;
+
+// Get all symbols
+for symbol in bv.symbols().iter() {
+    println!("{:#x}: {} ({})",
+        symbol.address(),
+        symbol.full_name(),
+        symbol.sym_type()
+    );
+}
+
+// Filter by type
+for symbol in bv.symbols().iter() {
+    if symbol.sym_type() == SymbolType::Function {
+        println!("Function symbol: {}", symbol.full_name());
+    }
+}
+```
+
+### Looking up symbols
+
+```rust
+// Get symbol at address
+if let Some(sym) = bv.symbol_at(0x1000) {
+    println!("Symbol: {}", sym.full_name());
+}
+
+// Get symbols by name
+for sym in bv.symbols_by_name("main") {
+    println!("Found main at {:#x}", sym.address());
+}
+```
+
+## Segments and sections
+
+### Segments
+
+```rust
+for segment in bv.segments().iter() {
+    println!("Segment: {:#x}-{:#x} ({})",
+        segment.start(),
+        segment.end(),
+        segment.flags()
+    );
+}
+```
+
+### Sections
+
+```rust
+for section in bv.sections().iter() {
+    println!("Section: {} at {:#x} (size: {:#x})",
+        section.name(),
+        section.start(),
+        section.len()
+    );
+}
+```
+
+## Strings
+
+```rust
+use binaryninja::string::StringType;
+
+// Find all strings
+for string in bv.strings().iter() {
+    println!("{:#x}: {:?} ({})",
+        string.start(),
+        string.value(),
+        string.string_type()
+    );
+}
+
+// Filter by type
+for string in bv.strings().iter() {
+    if matches!(string.string_type(), StringType::AsciiString) {
+        println!("ASCII: {:?}", string.value());
+    }
+}
+```
+
+## Analysis control
+
+### Update analysis
+
+```rust
+// Trigger analysis update
+bv.update_analysis();
+
+// Wait for analysis to complete
+bv.update_analysis_and_wait();
+```
+
+### Analysis state
+
+```rust
+use binaryninja::binary_view::AnalysisState;
+
+match bv.analysis_info().state {
+    AnalysisState::Idle => println!("Analysis complete"),
+    AnalysisState::Initial => println!("Initial analysis"),
+    AnalysisState::Disassemble => println!("Disassembling"),
+    _ => println!("Analyzing..."),
+}
+```
+
+## Complete example
+
+Analyzing a binary file:
+
+```rust
+use binaryninja::headless::Session;
+use binaryninja::binary_view::{BinaryViewBase, BinaryViewExt};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let session = Session::new()?;
+    let bv = session.load("/bin/ls")?;
+
+    // File info
+    println!("=== File Info ===");
+    println!("File: {}", bv.file().filename());
+    println!("Size: {:#x}", bv.len());
+    println!("Arch: {}", bv.arch().name());
+    println!("Platform: {}", bv.platform().name());
+
+    // Functions
+    println!("\n=== Functions ===");
+    for func in bv.functions().iter().take(10) {
+        println!("{:#x}: {}", func.start(), func.symbol().full_name());
+    }
+
+    // Strings
+    println!("\n=== Strings ===");
+    for string in bv.strings().iter().take(5) {
+        println!("{:#x}: {:?}", string.start(), string.value());
+    }
+
+    // Sections
+    println!("\n=== Sections ===");
+    for section in bv.sections().iter() {
+        println!("{}: {:#x} (size: {:#x})",
+            section.name(),
+            section.start(),
+            section.len()
+        );
+    }
+
+    Ok(())
+}
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Functions" href="/api/rust/function">
+    Analyze functions
+  </Card>
+  <Card title="Architecture" href="/api/rust/architecture">
+    Work with architectures
+  </Card>
+</CardGroup>

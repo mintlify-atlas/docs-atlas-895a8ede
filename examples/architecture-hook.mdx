@@ -1,0 +1,248 @@
+---
+title: Architecture Hooks
+description: Learn how to customize architecture behavior by hooking and modifying disassembly output
+---
+
+This example demonstrates how to use Architecture Hooks to modify the behavior of existing architectures, such as changing instruction mnemonics or customizing disassembly.
+
+## Overview
+
+The `arch_hook.py` example shows how to:
+- Create an architecture hook to modify existing architecture behavior
+- Override specific methods like `get_instruction_text`
+- Change instruction mnemonics in the disassembly view
+- Register custom architecture behavior
+
+## Complete Source Code
+
+```python
+from binaryninja.architecture import Architecture, ArchitectureHook
+
+
+class X86ReturnHook(ArchitectureHook):
+    def get_instruction_text(self, data, addr):
+        # Call the original implementation's method by calling the superclass
+        result, length = super(X86ReturnHook, self).get_instruction_text(data, addr)
+
+        # Patch the name of the 'retn' instruction to 'ret'
+        if len(result) > 0 and result[0].text == 'retn':
+            result[0].text = 'ret'
+
+        return result, length
+
+
+# Install the hook by constructing it with the desired architecture to hook, then registering it
+X86ReturnHook(Architecture['x86']).register()
+```
+
+## Key Concepts Explained
+
+<Steps>
+
+### Create an Architecture Hook Class
+
+```python
+class X86ReturnHook(ArchitectureHook):
+```
+
+Extend `ArchitectureHook` to create a hook for an existing architecture. The hook intercepts architecture methods and allows you to modify their behavior.
+
+### Override Architecture Methods
+
+```python
+def get_instruction_text(self, data, addr):
+    result, length = super(X86ReturnHook, self).get_instruction_text(data, addr)
+```
+
+Override methods from the base architecture:
+- `get_instruction_text(data, addr)` - Customize disassembly text
+- `get_instruction_info(data, addr)` - Modify instruction semantics
+- `get_instruction_low_level_il(data, addr, il)` - Customize IL lifting
+
+Always call the superclass method first to get the original behavior, then modify as needed.
+
+### Modify Instruction Tokens
+
+```python
+if len(result) > 0 and result[0].text == 'retn':
+    result[0].text = 'ret'
+```
+
+The `result` is a list of `InstructionTextToken` objects that represent the disassembly:
+- Each token has a `text` property (the string to display)
+- Tokens also have a `type` property (e.g., instruction mnemonic, register, operand)
+- Modify the text or add/remove tokens as needed
+
+### Register the Hook
+
+```python
+X86ReturnHook(Architecture['x86']).register()
+```
+
+Instantiate the hook with the target architecture and register it:
+- `Architecture['x86']` - References the built-in x86 architecture
+- `.register()` - Activates the hook for all future uses
+- Hooks apply globally once registered
+
+</Steps>
+
+## Advanced Hook Examples
+
+### Hook Multiple Methods
+
+```python
+from binaryninja.architecture import Architecture, ArchitectureHook
+from binaryninja.enums import InstructionTextTokenType
+
+class CustomARM64Hook(ArchitectureHook):
+    def get_instruction_text(self, data, addr):
+        result, length = super().get_instruction_text(data, addr)
+        
+        # Convert all register names to uppercase
+        for token in result:
+            if token.type == InstructionTextTokenType.RegisterToken:
+                token.text = token.text.upper()
+        
+        return result, length
+    
+    def get_instruction_info(self, data, addr):
+        info = super().get_instruction_info(data, addr)
+        # Customize instruction info (branch targets, length, etc.)
+        return info
+
+CustomARM64Hook(Architecture['aarch64']).register()
+```
+
+### Add Custom Instruction Annotations
+
+```python
+from binaryninja.architecture import Architecture, ArchitectureHook
+from binaryninja.enums import InstructionTextTokenType
+from binaryninja.function import InstructionTextToken
+
+class AnnotationHook(ArchitectureHook):
+    def get_instruction_text(self, data, addr):
+        result, length = super().get_instruction_text(data, addr)
+        
+        # Add custom annotation for syscall instructions
+        if len(result) > 0 and result[0].text == 'syscall':
+            result.append(InstructionTextToken(
+                InstructionTextTokenType.TextToken,
+                "  ; System call"
+            ))
+        
+        return result, length
+
+AnnotationHook(Architecture['x86_64']).register()
+```
+
+### Normalize Instruction Mnemonics
+
+```python
+class MnemonicNormalizer(ArchitectureHook):
+    # Map of mnemonics to normalize
+    MNEMONIC_MAP = {
+        'retn': 'ret',
+        'retf': 'ret',
+        'jmp': 'jump',
+        'je': 'jump_equal',
+    }
+    
+    def get_instruction_text(self, data, addr):
+        result, length = super().get_instruction_text(data, addr)
+        
+        if len(result) > 0:
+            mnemonic = result[0].text
+            if mnemonic in self.MNEMONIC_MAP:
+                result[0].text = self.MNEMONIC_MAP[mnemonic]
+        
+        return result, length
+
+MnemonicNormalizer(Architecture['x86']).register()
+```
+
+## Loading the Hook
+
+### As a Plugin
+
+Save the script to your Binary Ninja plugins directory:
+
+```
+~/.binaryninja/plugins/arch_hook.py  # Linux/Mac
+%APPDATA%\Binary Ninja\plugins\arch_hook.py  # Windows
+```
+
+The hook will be applied automatically when Binary Ninja starts.
+
+### In a Script
+
+```python
+import binaryninja
+from arch_hook import X86ReturnHook
+
+# Hook is registered when module is imported
+bv = binaryninja.load("/path/to/binary")
+# Disassembly will now show 'ret' instead of 'retn'
+```
+
+## Expected Behavior
+
+### Before Hook
+
+```nasm
+0x401000  push    ebp
+0x401001  mov     ebp, esp
+0x401003  xor     eax, eax
+0x401005  retn          ; Original mnemonic
+```
+
+### After Hook
+
+```nasm
+0x401000  push    ebp
+0x401001  mov     ebp, esp
+0x401003  xor     eax, eax
+0x401005  ret           ; Modified mnemonic
+```
+
+## Available Hook Methods
+
+You can override these methods in your `ArchitectureHook` subclass:
+
+### Disassembly Methods
+- `get_instruction_text(data, addr)` - Customize instruction text tokens
+- `get_instruction_info(data, addr)` - Modify instruction metadata
+- `get_instruction_length(data, addr)` - Override instruction length
+
+### IL Lifting Methods
+- `get_instruction_low_level_il(data, addr, il)` - Customize LLIL translation
+
+### Register and Flag Methods
+- `get_register_name(reg)` - Customize register names
+- `get_flag_name(flag)` - Customize flag names
+
+### Other Methods
+- `assemble(code, addr)` - Customize assembler behavior
+
+## Use Cases
+
+- **Mnemonic Standardization** - Normalize instruction names across architectures
+- **Custom Annotations** - Add domain-specific comments to disassembly
+- **Obfuscation Handling** - Simplify obfuscated instruction patterns
+- **Compatibility Layers** - Adapt architecture variants (e.g., ARM vs Thumb)
+- **Education** - Simplify instruction names for learning purposes
+
+## Important Notes
+
+<Warning>
+- Architecture hooks are **global** - they affect all binaries using that architecture
+- Modifying IL lifting can break analysis if done incorrectly
+- Test hooks thoroughly before deploying
+- Use hooks for display modifications, not for changing instruction semantics
+</Warning>
+
+## Related Examples
+
+- [Binary View Loader](/examples/binary-view-loader) - Custom file format support
+- [UI Integration](/examples/ui-integration) - Custom UI components
+- [Custom IL Visitor](/examples/custom-il-visitor) - IL analysis techniques

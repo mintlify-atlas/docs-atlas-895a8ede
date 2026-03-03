@@ -1,0 +1,520 @@
+---
+title: Custom IL Visitor
+description: Learn how to create custom IL visitors for advanced analysis and pattern matching
+---
+
+This example demonstrates advanced IL visitor patterns using Binary Ninja's Rust API, showing how to traverse and analyze MLIL expression trees.
+
+## Overview
+
+The `medium_level_il.rs` example shows how to:
+- Implement custom visitor patterns for IL traversal
+- Extract operands from IL expressions
+- Process different IL operand types
+- Build analysis tools using visitor patterns
+
+## Complete Source Code
+
+```rust
+use binaryninja::binary_view::{BinaryViewBase, BinaryViewExt};
+use binaryninja::tracing::TracingLogListener;
+
+fn main() {
+    tracing_subscriber::fmt::init();
+    let _listener = TracingLogListener::new().register();
+
+    // Initialize headless session
+    let headless_session =
+        binaryninja::headless::Session::new().expect("Failed to initialize session");
+
+    tracing::info!("Loading binary...");
+    let bv = headless_session
+        .load("/bin/cat")
+        .expect("Couldn't open `/bin/cat`");
+
+    tracing::info!("File:  `{}`", bv.file());
+    tracing::info!("File size: `{:#x}`", bv.len());
+    tracing::info!("Function count: {}", bv.functions().len());
+
+    for func in &bv.functions() {
+        println!("{:?}:", func.symbol().full_name());
+
+        let Ok(il) = func.medium_level_il() else {
+            continue;
+        };
+
+        // Get the SSA form for this function
+        let il = il.ssa_form();
+
+        // Loop through all blocks in the function
+        for block in il.basic_blocks().iter() {
+            // Loop though each instruction in the block
+            for instr in block.iter() {
+                // Uplift the instruction into a native rust format
+                let lifted = instr.lift();
+                let address = instr.address;
+
+                // Print the lifted instruction
+                println!(" {address:08x}: {lifted:#x?}");
+
+                // Generically parse the IL tree and display the parts
+                visitor::print_il_expr(&lifted, 2);
+            }
+        }
+    }
+}
+
+mod visitor {
+    use binaryninja::architecture::Intrinsic;
+    use binaryninja::medium_level_il::MediumLevelILLiftedOperand::*;
+    use binaryninja::medium_level_il::{MediumLevelILFunction, MediumLevelILLiftedInstruction};
+    use binaryninja::variable::Variable;
+
+    fn print_indent(indent: usize) {
+        print!("{:<indent$}", "")
+    }
+
+    fn print_operation(operation: &MediumLevelILLiftedInstruction) {
+        print!("{}", operation.name());
+    }
+
+    fn print_variable(func: &MediumLevelILFunction, var: &Variable) {
+        print!("{}", func.function().variable_name(var));
+    }
+
+    pub(crate) fn print_il_expr(instr: &MediumLevelILLiftedInstruction, mut indent: usize) {
+        print_indent(indent);
+        print_operation(instr);
+
+        println!();
+
+        indent += 1;
+
+        for (_name, operand) in instr.operands() {
+            match operand {
+                Int(int) => {
+                    print_indent(indent);
+                    println!("int 0x{:x}", int);
+                }
+                Float(float) => {
+                    print_indent(indent);
+                    println!("float {:e}", float);
+                }
+                Expr(expr) => print_il_expr(&expr, indent),
+                Var(var) => {
+                    print_indent(indent);
+                    print!("var ");
+                    print_variable(&instr.function, &var);
+                    println!();
+                }
+                VarSsa(var) => {
+                    print_indent(indent);
+                    print!("ssa var ");
+                    print_variable(&instr.function, &var.variable);
+                    println!("#{}", var.version);
+                }
+                IntList(list) => {
+                    print_indent(indent);
+                    print!("index list ");
+                    for i in list {
+                        print!("{i} ");
+                    }
+                    println!();
+                }
+                VarList(list) => {
+                    print_indent(indent);
+                    print!("var list ");
+                    for i in list {
+                        print_variable(&instr.function, &i);
+                        print!(" ");
+                    }
+                    println!();
+                }
+                VarSsaList(list) => {
+                    print_indent(indent);
+                    print!("ssa var list ");
+                    for i in list {
+                        print_variable(&instr.function, &i.variable);
+                        print!("#{} ", i.version);
+                    }
+                    println!();
+                }
+                ExprList(list) => {
+                    print_indent(indent);
+                    println!("expr list");
+                    for i in list {
+                        print_il_expr(&i, indent + 1);
+                    }
+                }
+                TargetMap(list) => {
+                    print_indent(indent);
+                    print!("target map ");
+                    for (i, f) in list {
+                        print!("({i}, {f})  ");
+                    }
+                    println!();
+                }
+                ConstantData(_) => println!("constantdata"),
+                Intrinsic(intrinsic) => println!("intrinsic {}", intrinsic.name()),
+                InstructionIndex(idx) => {
+                    print_indent(indent);
+                    println!("index {}", idx);
+                }
+            }
+        }
+    }
+}
+```
+
+## Key Concepts Explained
+
+<Steps>
+
+### Access MLIL SSA Form
+
+```rust
+let il = func.medium_level_il()?;
+let il = il.ssa_form();
+```
+
+SSA (Static Single Assignment) form provides:
+- Unique variable versions for each assignment
+- Explicit data flow through phi nodes
+- Better for data flow analysis
+- Use `.ssa_form()` to get SSA representation
+
+### Lift IL Instructions
+
+```rust
+for instr in block.iter() {
+    let lifted = instr.lift();
+    let address = instr.address;
+}
+```
+
+Lifting converts IL to Rust-native types:
+- `instr.lift()` - Convert to `MediumLevelILLiftedInstruction`
+- Provides type-safe access to operands
+- Enables pattern matching with Rust enums
+
+### Implement Recursive Visitor
+
+```rust
+fn print_il_expr(instr: &MediumLevelILLiftedInstruction, mut indent: usize) {
+    print_indent(indent);
+    print_operation(instr);
+    println!();
+    
+    indent += 1;
+    
+    for (_name, operand) in instr.operands() {
+        match operand {
+            Expr(expr) => print_il_expr(&expr, indent),  // Recursion!
+            // Handle other operand types
+            _ => { /* ... */ }
+        }
+    }
+}
+```
+
+Recursive visitors traverse expression trees:
+- Process current instruction
+- Iterate operands
+- Recursively process child expressions
+- Maintain indentation/context through parameters
+
+### Pattern Match Operand Types
+
+```rust
+for (_name, operand) in instr.operands() {
+    match operand {
+        Int(int) => {
+            println!("int 0x{:x}", int);
+        }
+        Float(float) => {
+            println!("float {:e}", float);
+        }
+        Expr(expr) => print_il_expr(&expr, indent),
+        Var(var) => {
+            print!("var ");
+            print_variable(&instr.function, &var);
+        }
+        VarSsa(var) => {
+            print!("ssa var {}", var.variable);
+            println!("#{}", var.version);
+        }
+        // ... more types
+    }
+}
+```
+
+MLIL operand types:
+- `Int(u64)` - Integer constants
+- `Float(f64)` - Floating-point constants  
+- `Expr(...)` - Sub-expressions (recursive)
+- `Var(Variable)` - Variable references
+- `VarSsa(SSAVariable)` - SSA variable with version
+- `VarList(Vec<Variable>)` - Lists of variables
+- `ExprList(Vec<...>)` - Lists of expressions
+- `Intrinsic(...)` - Intrinsic function calls
+
+### Access Variable Names
+
+```rust
+fn print_variable(func: &MediumLevelILFunction, var: &Variable) {
+    print!("{}", func.function().variable_name(var));
+}
+```
+
+Resolve variable names:
+- Variables are identified by `Variable` objects
+- Use `function().variable_name()` to get human-readable names
+- Names can be user-defined or auto-generated
+
+</Steps>
+
+## Advanced Visitor Patterns
+
+### Constant Collector
+
+```rust
+use std::collections::HashSet;
+
+fn collect_constants(instr: &MediumLevelILLiftedInstruction) -> HashSet<u64> {
+    let mut constants = HashSet::new();
+    
+    fn visit(instr: &MediumLevelILLiftedInstruction, constants: &mut HashSet<u64>) {
+        for (_name, operand) in instr.operands() {
+            match operand {
+                Int(value) => {
+                    constants.insert(value);
+                }
+                Expr(expr) => visit(&expr, constants),
+                ExprList(list) => {
+                    for expr in list {
+                        visit(&expr, constants);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    
+    visit(instr, &mut constants);
+    constants
+}
+```
+
+### Call Site Finder
+
+```rust
+use binaryninja::medium_level_il::MediumLevelILLiftedInstruction::*;
+
+fn find_calls(func: &Function) -> Vec<(u64, Option<u64>)> {
+    let mut calls = Vec::new();
+    
+    let Ok(mlil) = func.medium_level_il() else {
+        return calls;
+    };
+    
+    for block in mlil.basic_blocks().iter() {
+        for instr in block.iter() {
+            let lifted = instr.lift();
+            
+            match lifted {
+                Call { dest, .. } => {
+                    // Try to resolve constant call targets
+                    let target = match dest.operands().next() {
+                        Some((_, Int(addr))) => Some(addr),
+                        _ => None,
+                    };
+                    calls.push((instr.address, target));
+                }
+                _ => {}
+            }
+        }
+    }
+    
+    calls
+}
+```
+
+### Variable Use Analyzer
+
+```rust
+use std::collections::HashMap;
+
+fn analyze_variable_uses(func: &Function) -> HashMap<Variable, usize> {
+    let mut use_counts = HashMap::new();
+    
+    let Ok(mlil) = func.medium_level_il() else {
+        return use_counts;
+    };
+    
+    fn count_uses(
+        instr: &MediumLevelILLiftedInstruction,
+        counts: &mut HashMap<Variable, usize>
+    ) {
+        for (_name, operand) in instr.operands() {
+            match operand {
+                Var(var) => {
+                    *counts.entry(var).or_insert(0) += 1;
+                }
+                VarSsa(ssa_var) => {
+                    *counts.entry(ssa_var.variable).or_insert(0) += 1;
+                }
+                Expr(expr) => count_uses(&expr, counts),
+                ExprList(list) => {
+                    for expr in list {
+                        count_uses(&expr, counts);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    
+    for block in mlil.basic_blocks().iter() {
+        for instr in block.iter() {
+            count_uses(&instr.lift(), &mut use_counts);
+        }
+    }
+    
+    use_counts
+}
+```
+
+### Pattern Matcher
+
+```rust
+use binaryninja::medium_level_il::MediumLevelILLiftedInstruction::*;
+
+// Find patterns like: if (x == 0) { ... }
+fn find_null_checks(func: &Function) -> Vec<u64> {
+    let mut null_checks = Vec::new();
+    
+    let Ok(mlil) = func.medium_level_il() else {
+        return null_checks;
+    };
+    
+    for block in mlil.basic_blocks().iter() {
+        for instr in block.iter() {
+            let lifted = instr.lift();
+            
+            if let If { condition, .. } = lifted {
+                // Check if condition is (var == 0)
+                if let CmpE { left, right, .. } = condition.as_ref() {
+                    let is_null_check = matches!(
+                        (left.operands().next(), right.operands().next()),
+                        (Some((_, Var(_))), Some((_, Int(0)))) |
+                        (Some((_, Int(0))), Some((_, Var(_))))
+                    );
+                    
+                    if is_null_check {
+                        null_checks.push(instr.address);
+                    }
+                }
+            }
+        }
+    }
+    
+    null_checks
+}
+```
+
+## Python IL Visitor Example
+
+For Python-based IL analysis:
+
+```python
+import binaryninja as bn
+from binaryninja import MediumLevelILOperation
+
+class ConstantCollector:
+    def __init__(self):
+        self.constants = set()
+    
+    def visit(self, expr):
+        """Recursively visit IL expression tree"""
+        if expr.operation == MediumLevelILOperation.MLIL_CONST:
+            self.constants.add(expr.constant)
+        elif expr.operation == MediumLevelILOperation.MLIL_CONST_PTR:
+            self.constants.add(expr.constant)
+        
+        # Visit all operands
+        for operand in expr.operands:
+            if isinstance(operand, bn.MediumLevelILInstruction):
+                self.visit(operand)
+            elif isinstance(operand, list):
+                for item in operand:
+                    if isinstance(item, bn.MediumLevelILInstruction):
+                        self.visit(item)
+        
+        return self.constants
+
+def find_constants_in_function(func):
+    collector = ConstantCollector()
+    
+    mlil = func.mlil
+    if not mlil:
+        return set()
+    
+    for block in mlil:
+        for instr in block:
+            collector.visit(instr)
+    
+    return collector.constants
+
+# Usage
+bv = bn.load("/path/to/binary")
+for func in bv.functions:
+    constants = find_constants_in_function(func)
+    print(f"{func.name}: {len(constants)} unique constants")
+```
+
+## Building and Running
+
+```bash
+cd ~/workspace/source/rust/examples
+cargo build --release --example medium_level_il
+cargo run --release --example medium_level_il
+```
+
+## Expected Output
+
+```
+INFO Loading binary...
+INFO File: `/bin/cat`
+INFO File size: `0x1a540`
+INFO Function count: 142
+
+"_main":
+  00001a60: SetVar { dest: SSAVariable { variable: var_18, version: 1 }, src: ... }
+    MLIL_SET_VAR_SSA
+        ssa var var_18#1
+        MLIL_VAR_SSA
+            ssa var arg1#0
+  00001a64: SetVar { dest: SSAVariable { variable: var_20, version: 1 }, src: ... }
+    MLIL_SET_VAR_SSA
+        ssa var var_20#1
+        MLIL_VAR_SSA
+            ssa var arg2#0
+  ...
+```
+
+## Use Cases
+
+- **Static Analysis** - Find security vulnerabilities
+- **Code Pattern Detection** - Identify coding patterns
+- **Data Flow Analysis** - Track data through functions
+- **Symbolic Execution** - Build symbolic execution engines
+- **Deobfuscation** - Identify and simplify obfuscated code
+- **Metrics Collection** - Complexity analysis
+- **Automated Reverse Engineering** - Extract program semantics
+
+## Related Examples
+
+- [IL Parsing](/examples/il-parsing) - C++ IL parsing examples
+- [Function Iteration](/examples/function-iteration) - Basic IL iteration
+- [Workflow Extension](/examples/workflow-extension) - IL transformation
+- [Headless Automation](/examples/headless-automation) - Automated analysis

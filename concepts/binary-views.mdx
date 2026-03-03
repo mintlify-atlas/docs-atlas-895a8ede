@@ -1,0 +1,337 @@
+---
+title: Binary Views
+description: Understanding Binary Ninja's BinaryView abstraction for analyzing binary files
+---
+
+## Overview
+
+A **BinaryView** is Binary Ninja's core abstraction for representing and analyzing binary data. It provides a queryable interface to binary files, allowing you to inspect code, data, segments, sections, functions, and more. Think of it as a lens through which you examine different aspects of a binary.
+
+<Info>
+Binary Views are layered - you can have multiple views of the same file (e.g., Raw, PE, ELF, Mach-O), each providing different levels of abstraction and information.
+</Info>
+
+## Key Concepts
+
+### View Hierarchy
+
+Binary Ninja uses a layered approach to binary analysis:
+
+1. **Raw View** - The most basic view, representing raw binary data
+2. **Format Views** - Architecture-specific parsers (PE, ELF, Mach-O, etc.)
+3. **Mapped Views** - Views that remap or transform data
+
+Each layer builds upon the previous one, providing progressively more semantic information.
+
+### Creating and Opening BinaryViews
+
+```python
+import binaryninja
+from binaryninja import load
+
+# Load a binary file
+bv = load("/path/to/binary")
+
+# Load with specific options
+bv = load("/path/to/binary", options={
+    'analysis.mode': 'basic',
+    'analysis.linearSweep.autorun': False
+})
+
+# Access the raw view
+raw_view = bv.parent_view
+
+# Get the view type name
+print(bv.view_type)  # e.g., "PE", "ELF", "Mach-O"
+```
+
+## Core Properties
+
+### Basic Information
+
+```python
+# File and view information
+print(f"File: {bv.file.filename}")
+print(f"View Type: {bv.view_type}")
+print(f"Architecture: {bv.arch.name}")
+print(f"Platform: {bv.platform.name}")
+
+# Address information
+print(f"Start: 0x{bv.start:x}")
+print(f"Entry Point: 0x{bv.entry_point:x}")
+print(f"Length: {len(bv)}")
+```
+
+### Endianness
+
+```python
+from binaryninja.enums import Endianness
+
+# Check endianness
+if bv.endianness == Endianness.LittleEndian:
+    print("Little endian")
+else:
+    print("Big endian")
+```
+
+## Reading and Writing Data
+
+### Reading Binary Data
+
+```python
+# Read raw bytes
+data = bv.read(address, length)
+
+# Read specific data types
+value_8 = bv.read8(address)    # Read 1 byte
+value_16 = bv.read16(address)  # Read 2 bytes
+value_32 = bv.read32(address)  # Read 4 bytes
+value_64 = bv.read64(address)  # Read 8 bytes
+
+# Read with endianness handling
+value = bv.read_le16(address)  # Little endian 16-bit
+value = bv.read_be32(address)  # Big endian 32-bit
+```
+
+### Writing Binary Data
+
+```python
+# Write raw bytes
+bv.write(address, b"\x90\x90\x90\x90")
+
+# Write specific data types
+bv.write8(address, 0x90)
+bv.write16(address, 0x9090)
+bv.write32(address, 0x90909090)
+
+# Insert or remove bytes
+bv.insert(address, b"\x00" * 16)  # Insert 16 null bytes
+bv.remove(address, 16)             # Remove 16 bytes
+```
+
+<Warning>
+Modifying binary data affects analysis. Binary Ninja will automatically update analysis when data changes, but you may need to reanalyze functions or trigger updates manually.
+</Warning>
+
+## Segments and Sections
+
+### Segments
+
+Segments define memory regions with specific permissions:
+
+```python
+# List all segments
+for segment in bv.segments:
+    perms = ""
+    perms += "r" if segment.readable else "-"
+    perms += "w" if segment.writable else "-"
+    perms += "x" if segment.executable else "-"
+    print(f"Segment: 0x{segment.start:x}-0x{segment.end:x} {perms}")
+
+# Get segment at address
+segment = bv.get_segment_at(address)
+if segment:
+    print(f"Address 0x{address:x} is in segment: {segment}")
+
+# Add custom segment
+from binaryninja.enums import SegmentFlag
+
+flags = SegmentFlag.SegmentReadable | SegmentFlag.SegmentExecutable
+bv.add_user_segment(start=0x1000, length=0x1000, 
+                     data_offset=0, data_length=0x1000,
+                     flags=flags)
+```
+
+### Sections
+
+Sections provide semantic meaning to regions (e.g., .text, .data, .bss):
+
+```python
+# List all sections
+for section in bv.sections:
+    print(f"Section '{section.name}': 0x{section.start:x}-0x{section.end:x}")
+    print(f"  Type: {section.semantics}")
+
+# Get section by name
+text_section = bv.get_section_by_name(".text")
+if text_section:
+    print(f".text at 0x{text_section.start:x}")
+```
+
+## Functions
+
+### Accessing Functions
+
+```python
+# Get all functions
+for func in bv.functions:
+    print(f"Function: {func.name} at 0x{func.start:x}")
+
+# Get function at address
+func = bv.get_function_at(address)
+
+# Get functions containing an address
+funcs = bv.get_functions_containing(address)
+
+# Get function by name
+func = bv.get_function_by_name("main")
+```
+
+### Creating Functions
+
+```python
+# Add function at address
+bv.add_function(address)
+
+# Create function with specific platform
+bv.create_user_function(address, plat=bv.platform)
+
+# Remove function
+bv.remove_function(func)
+```
+
+## Strings
+
+```python
+# List all strings
+for string in bv.strings:
+    print(f"0x{string.start:x}: {string.value}")
+
+# Get strings in a range
+strings_in_range = bv.get_strings(start_address, length)
+
+# String types include ASCII, UTF-8, UTF-16, UTF-32
+from binaryninja.enums import StringType
+
+for s in bv.strings:
+    if s.type == StringType.AsciiString:
+        print(f"ASCII string: {s.value}")
+```
+
+## Analysis Control
+
+### Analysis State
+
+```python
+from binaryninja.enums import AnalysisState
+
+# Check analysis state
+if bv.analysis_info.state == AnalysisState.IdleState:
+    print("Analysis complete")
+elif bv.analysis_info.state == AnalysisState.InitialState:
+    print("Analysis not started")
+else:
+    print("Analysis in progress")
+
+# Wait for analysis to complete
+bv.update_analysis_and_wait()
+
+# Update analysis for specific function
+func.reanalyze()
+```
+
+### Analysis Events
+
+```python
+from binaryninja import AnalysisCompletionEvent
+
+def on_analysis_complete():
+    print("Analysis finished!")
+
+# Register completion callback
+event = AnalysisCompletionEvent(bv, on_analysis_complete)
+```
+
+## Notifications
+
+BinaryView supports event notifications for changes:
+
+```python
+from binaryninja import BinaryDataNotification, NotificationType
+
+class MyNotification(BinaryDataNotification):
+    def __init__(self):
+        # Subscribe to specific notification types
+        super().__init__(
+            NotificationType.FunctionAdded | 
+            NotificationType.DataWritten
+        )
+    
+    def function_added(self, view, func):
+        print(f"Function added: {func.name} at 0x{func.start:x}")
+    
+    def data_written(self, view, offset, length):
+        print(f"Data written at 0x{offset:x}, length {length}")
+
+# Register notification
+notif = MyNotification()
+bv.register_notification(notif)
+
+# Unregister when done
+bv.unregister_notification(notif)
+```
+
+## Available BinaryView Types
+
+Binary Ninja includes these built-in view types:
+
+- **ELF** - Executable and Linkable Format (Linux, Unix)
+- **PE** - Portable Executable (Windows)
+- **Mach-O** - Mach Object (macOS, iOS)
+- **COFF** - Common Object File Format
+- **TE** - Terse Executable
+- **MD1Rom** - Sega Genesis/MD ROM format  
+- **Shared Cache** - Apple dyld shared cache
+- **Kernel Cache** - Apple kernel cache
+- **Raw** - Raw binary data
+
+## Practical Example
+
+Here's a complete example that demonstrates common BinaryView operations:
+
+```python
+import binaryninja
+from binaryninja import load
+
+def analyze_binary(filepath):
+    # Load binary
+    bv = load(filepath)
+    
+    print(f"## {bv.file.filename} ##")
+    print(f"- START: 0x{bv.start:x}")
+    print(f"- ENTRY: 0x{bv.entry_point:x}")
+    print(f"- ARCH: {bv.arch.name}")
+    
+    # Wait for analysis
+    bv.update_analysis_and_wait()
+    
+    # Print first 10 functions
+    print("\n### Functions ###")
+    for i, func in enumerate(bv.functions[:10]):
+        print(f"0x{func.start:x} | {func.symbol.full_name}")
+    
+    # Print first 10 strings
+    print("\n### Strings ###")
+    for i, s in enumerate(bv.strings[:10]):
+        print(f"0x{s.start:x} | {len(s)} | {s.value}")
+    
+    # Print segments
+    print("\n### Segments ###")
+    for segment in bv.segments:
+        r = "r" if segment.readable else "-"
+        w = "w" if segment.writable else "-" 
+        x = "x" if segment.executable else "-"
+        print(f"0x{segment.start:x}-0x{segment.end:x} {r}{w}{x}")
+    
+    bv.file.close()
+
+if __name__ == "__main__":
+    analyze_binary("/path/to/binary")
+```
+
+## Related Concepts
+
+- [Architectures](./architectures) - CPU architecture support
+- [Functions](./functions) - Function analysis and manipulation
+- [Types](./types) - Type system and type information
+- [Symbols](./symbols) - Symbol management

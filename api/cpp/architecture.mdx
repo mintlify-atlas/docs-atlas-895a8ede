@@ -1,0 +1,490 @@
+---
+title: Architecture Class
+description: C++ API reference for the Architecture class - CPU architecture support and disassembly
+---
+
+The `Architecture` class is the base class for all CPU architectures in Binary Ninja. It provides disassembly, assembly, patching, and IL translation capabilities for a given architecture.
+
+## Class Declaration
+
+Defined in `binaryninjaapi.h:9490`
+
+```cpp
+namespace BinaryNinja {
+    class Architecture : public StaticCoreRefCountObject<BNArchitecture>
+    {
+    protected:
+        std::string m_nameForRegister;
+
+        Architecture(BNArchitecture* arch);
+        Architecture(const std::string& name);
+
+        // Virtual methods for custom architectures
+        virtual BNEndianness GetEndianness() const = 0;
+        virtual size_t GetAddressSize() const = 0;
+        virtual size_t GetDefaultIntegerSize() const = 0;
+        virtual size_t GetMaxInstructionLength() const = 0;
+
+        virtual bool GetInstructionInfo(
+            const uint8_t* data, uint64_t addr, 
+            size_t maxLen, BNInstructionInfo& result) = 0;
+
+        virtual bool GetInstructionText(
+            const uint8_t* data, uint64_t addr, size_t& len,
+            std::vector<InstructionTextToken>& result) = 0;
+
+        virtual bool GetInstructionLowLevelIL(
+            const uint8_t* data, uint64_t addr, size_t& len,
+            LowLevelILFunction& il) = 0;
+
+    public:
+        static void Register(Architecture* arch);
+        static Ref<Architecture> GetByName(const std::string& name);
+        static std::vector<Ref<Architecture>> GetList();
+
+        // ... many more methods
+    };
+}
+```
+
+## Getting Architecture Instances
+
+### Get by Name
+
+```cpp
+static Ref<Architecture> GetByName(const std::string& name);
+```
+
+Returns an architecture by name.
+
+**Example:**
+```cpp
+Ref<Architecture> x86 = Architecture::GetByName("x86");
+Ref<Architecture> x64 = Architecture::GetByName("x86_64");
+Ref<Architecture> arm = Architecture::GetByName("armv7");
+Ref<Architecture> aarch64 = Architecture::GetByName("aarch64");
+```
+
+From the [cmdline_disasm example](https://github.com/Vector35/binaryninjaapi/blob/dev/examples/cmdline_disasm/src/disasm.cpp:70-77):
+
+```cpp
+BNArchitecture* arch = BNGetArchitectureByName(archmode);
+if (!arch) {
+    printf("ERROR: BNGetArchitectureByName() (is \"%s\" valid?)\n", archmode);
+    return -1;
+}
+```
+
+### Get All Architectures
+
+```cpp
+static std::vector<Ref<Architecture>> GetList();
+```
+
+Returns a list of all registered architectures.
+
+**Example:**
+```cpp
+for (auto arch : Architecture::GetList()) {
+    cout << "Architecture: " << arch->GetName() << endl;
+}
+```
+
+## Architecture Properties
+
+### Get Name
+
+```cpp
+std::string GetName() const;
+```
+
+Returns the architecture name (e.g., "x86", "x86_64", "aarch64").
+
+### Get Endianness
+
+```cpp
+BNEndianness GetEndianness() const;
+```
+
+Returns the byte order (endianness) of the architecture.
+
+**Values:**
+- `LittleEndian` - Little-endian byte order
+- `BigEndian` - Big-endian byte order
+
+### Get Address Size
+
+```cpp
+size_t GetAddressSize() const;
+```
+
+Returns the size of an address in bytes (e.g., 4 for 32-bit, 8 for 64-bit).
+
+### Get Default Integer Size
+
+```cpp
+size_t GetDefaultIntegerSize() const;
+```
+
+Returns the default integer size for the architecture.
+
+### Get Instruction Alignment
+
+```cpp
+size_t GetInstructionAlignment() const;
+```
+
+Returns the instruction alignment requirement in bytes.
+
+### Get Max Instruction Length
+
+```cpp
+size_t GetMaxInstructionLength() const;
+```
+
+Returns the maximum length of an instruction in bytes.
+
+## Disassembly
+
+### Get Instruction Info
+
+```cpp
+bool GetInstructionInfo(const uint8_t* data, uint64_t addr, 
+                        size_t maxLen, InstructionInfo& result);
+```
+
+Decodes instruction information including length and branch targets.
+
+**Parameters:**
+- `data` - Pointer to instruction bytes
+- `addr` - Virtual address of the instruction
+- `maxLen` - Maximum number of bytes to decode
+- `result` - Output InstructionInfo structure
+
+**Returns:** true if successful
+
+### Get Instruction Text
+
+```cpp
+bool GetInstructionText(const uint8_t* data, uint64_t addr, size_t& len,
+                        std::vector<InstructionTextToken>& result);
+```
+
+Disassembles an instruction into text tokens.
+
+**Example:**
+```cpp
+uint8_t bytes[] = {0x55, 0x48, 0x89, 0xe5}; // push rbp; mov rbp, rsp
+std::vector<InstructionTextToken> tokens;
+size_t len = sizeof(bytes);
+
+if (arch->GetInstructionText(bytes, 0x401000, len, tokens)) {
+    for (const auto& token : tokens) {
+        cout << token.text;
+    }
+    cout << endl;
+}
+```
+
+From the [cmdline_disasm example](https://github.com/Vector35/binaryninjaapi/blob/dev/examples/cmdline_disasm/src/disasm.cpp:95-103):
+
+```cpp
+BNInstructionTextToken* ttResult = NULL;
+size_t ttCount;
+size_t nBytesDisasm = input_n;
+
+BNGetInstructionText(arch, (const uint8_t*)input, 0, &nBytesDisasm, &ttResult, &ttCount);
+
+for (i = 0; i < ttCount; ++i)
+    printf("%s", ttResult[i].text);
+printf("\n");
+
+BNFreeInstructionText(ttResult, ttCount);
+```
+
+### Get Instruction Low-Level IL
+
+```cpp
+bool GetInstructionLowLevelIL(const uint8_t* data, uint64_t addr, 
+                               size_t& len, LowLevelILFunction& il);
+```
+
+Translates an instruction into Low-Level IL.
+
+## Registers
+
+### Get Register Name
+
+```cpp
+std::string GetRegisterName(uint32_t reg);
+```
+
+Returns the name of a register given its ID.
+
+### Get All Registers
+
+```cpp
+std::vector<uint32_t> GetAllRegisters();
+std::vector<uint32_t> GetFullWidthRegisters();
+```
+
+Returns all registers or just full-width registers.
+
+**Example:**
+```cpp
+for (uint32_t reg : arch->GetAllRegisters()) {
+    cout << "Register: " << arch->GetRegisterName(reg) << endl;
+}
+```
+
+### Get Register Info
+
+```cpp
+BNRegisterInfo GetRegisterInfo(uint32_t reg);
+```
+
+Returns detailed information about a register.
+
+**RegisterInfo fields:**
+- `fullWidthRegister` - The full-width version of this register
+- `size` - Size of the register in bytes
+- `offset` - Offset within the full-width register
+
+### Special Registers
+
+```cpp
+uint32_t GetStackPointerRegister();
+uint32_t GetLinkRegister();
+std::vector<uint32_t> GetGlobalRegisters();
+```
+
+Get special-purpose registers.
+
+## Flags
+
+### Get Flag Name
+
+```cpp
+std::string GetFlagName(uint32_t flag);
+```
+
+Returns the name of a flag given its ID.
+
+### Get All Flags
+
+```cpp
+std::vector<uint32_t> GetAllFlags();
+```
+
+Returns all flags for the architecture.
+
+### Get Flag Role
+
+```cpp
+BNFlagRole GetFlagRole(uint32_t flag, uint32_t semClass = 0);
+```
+
+Returns the semantic role of a flag.
+
+**Flag Roles:**
+- `SpecialFlagRole`
+- `ZeroFlagRole`
+- `PositiveSignFlagRole`
+- `NegativeSignFlagRole`
+- `CarryFlagRole`
+- `OverflowFlagRole`
+
+## Assembly
+
+### Check Assembly Support
+
+```cpp
+bool CanAssemble() const;
+```
+
+Returns true if the architecture supports assembly.
+
+### Assemble
+
+```cpp
+bool Assemble(const std::string& code, uint64_t addr, 
+              DataBuffer& result, std::string& errors);
+```
+
+Assembles code into machine code bytes.
+
+**Example:**
+```cpp
+DataBuffer result;
+std::string errors;
+
+if (arch->Assemble("push rbp\nmov rbp, rsp", 0x401000, result, errors)) {
+    cout << "Assembled " << result.GetLength() << " bytes" << endl;
+} else {
+    cerr << "Assembly error: " << errors << endl;
+}
+```
+
+## Code Patching
+
+### Check Patch Availability
+
+```cpp
+bool IsNeverBranchPatchAvailable(const uint8_t* data, uint64_t addr, size_t len);
+bool IsAlwaysBranchPatchAvailable(const uint8_t* data, uint64_t addr, size_t len);
+bool IsInvertBranchPatchAvailable(const uint8_t* data, uint64_t addr, size_t len);
+bool IsSkipAndReturnZeroPatchAvailable(const uint8_t* data, uint64_t addr, size_t len);
+bool IsSkipAndReturnValuePatchAvailable(const uint8_t* data, uint64_t addr, size_t len);
+```
+
+Check if specific patch types are available for an instruction.
+
+### Apply Patches
+
+```cpp
+bool ConvertToNop(uint8_t* data, uint64_t addr, size_t len);
+bool AlwaysBranch(uint8_t* data, uint64_t addr, size_t len);
+bool InvertBranch(uint8_t* data, uint64_t addr, size_t len);
+bool SkipAndReturnValue(uint8_t* data, uint64_t addr, size_t len, uint64_t value);
+```
+
+Apply patches to instruction bytes.
+
+**Example:**
+```cpp
+uint8_t instr[] = {0x74, 0x05}; // je +5
+
+if (arch->IsInvertBranchPatchAvailable(instr, 0x401000, sizeof(instr))) {
+    arch->InvertBranch(instr, 0x401000, sizeof(instr));
+    // instr is now: {0x75, 0x05} // jne +5
+}
+```
+
+## Creating Custom Architectures
+
+You can create custom architecture support by subclassing `Architecture`:
+
+```cpp
+class MyArchitecture : public Architecture {
+public:
+    MyArchitecture() : Architecture("MyArch") {}
+
+    virtual BNEndianness GetEndianness() const override {
+        return LittleEndian;
+    }
+
+    virtual size_t GetAddressSize() const override {
+        return 4; // 32-bit
+    }
+
+    virtual size_t GetDefaultIntegerSize() const override {
+        return 4;
+    }
+
+    virtual size_t GetInstructionAlignment() const override {
+        return 1;
+    }
+
+    virtual size_t GetMaxInstructionLength() const override {
+        return 16;
+    }
+
+    virtual bool GetInstructionInfo(
+        const uint8_t* data, uint64_t addr, 
+        size_t maxLen, InstructionInfo& result) override 
+    {
+        // Decode instruction and populate result
+        result.length = 1;
+        return true;
+    }
+
+    virtual bool GetInstructionText(
+        const uint8_t* data, uint64_t addr, size_t& len,
+        std::vector<InstructionTextToken>& result) override 
+    {
+        // Disassemble instruction into tokens
+        result.push_back(InstructionTextToken(
+            InstructionToken, "nop"));
+        len = 1;
+        return true;
+    }
+
+    virtual bool GetInstructionLowLevelIL(
+        const uint8_t* data, uint64_t addr, size_t& len,
+        LowLevelILFunction& il) override 
+    {
+        // Translate to LLIL
+        il.AddInstruction(il.Nop());
+        len = 1;
+        return true;
+    }
+};
+
+// Register the architecture
+void RegisterMyArchitecture() {
+    Architecture::Register(new MyArchitecture());
+}
+```
+
+## Complete Disassembly Example
+
+Simple command-line disassembler from the [cmdline_disasm example](https://github.com/Vector35/binaryninjaapi/blob/dev/examples/cmdline_disasm/src/disasm.cpp):
+
+```cpp
+#include "binaryninjacore.h"
+#include "binaryninjaapi.h"
+#include <cstdio>
+
+using namespace BinaryNinja;
+
+int main(int ac, char** av) {
+    // Initialize plugins
+    char* path = BNGetBundledPluginDirectory();
+    BNSetBundledPluginDirectory(path);
+    BNInitPlugins(true);
+
+    // Get architecture
+    BNArchitecture* arch = BNGetArchitectureByName(av[1]);
+    if (!arch) {
+        printf("ERROR: Unknown architecture\n");
+        return -1;
+    }
+
+    // Parse instruction bytes
+    uint8_t input[64];
+    unsigned int input_n = ac - 2;
+    for (unsigned int i = 0; i < input_n; ++i) {
+        // Parse hex bytes from command line
+        sscanf(av[i + 2], "%hhx", &input[i]);
+    }
+
+    // Disassemble
+    BNInstructionTextToken* tokens = NULL;
+    size_t tokenCount;
+    size_t length = input_n;
+
+    BNGetInstructionText(arch, input, 0, &length, &tokens, &tokenCount);
+
+    // Print result
+    for (size_t i = 0; i < tokenCount; ++i)
+        printf("%s", tokens[i].text);
+    printf("\n");
+
+    // Cleanup
+    BNFreeInstructionText(tokens, tokenCount);
+    BNShutdown();
+    return 0;
+}
+```
+
+Usage:
+```bash
+./cmdline_disasm x86_64 48 89 e5
+# Output: mov rbp, rsp
+```
+
+## See Also
+
+- [BinaryView Class](/api/cpp/binaryview) - Binary file interface
+- [Function Class](/api/cpp/function) - Function analysis
+- [IL Classes](/api/cpp/il) - Intermediate language representations

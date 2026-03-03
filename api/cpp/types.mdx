@@ -1,0 +1,539 @@
+---
+title: Type Class
+description: C++ API reference for the Type class - Binary Ninja's type system
+---
+
+The `Type` class represents type information in Binary Ninja, including primitive types, structures, functions, pointers, and arrays. The type system is essential for understanding data layout and function signatures.
+
+## Class Declaration
+
+Defined in `binaryninjaapi.h:10520`
+
+```cpp
+namespace BinaryNinja {
+    class Type : public CoreRefCountObject<BNType, 
+                                           BNNewTypeReference, 
+                                           BNFreeType>
+    {
+    public:
+        Type(BNType* type);
+
+        bool operator==(const Type& other);
+        bool operator!=(const Type& other);
+
+        // Type classification
+        BNTypeClass GetClass() const;
+        uint64_t GetWidth() const;
+        size_t GetAlignment() const;
+        QualifiedName GetTypeName() const;
+
+        // Type attributes
+        Confidence<bool> IsSigned() const;
+        Confidence<bool> IsConst() const;
+        Confidence<bool> IsVolatile() const;
+
+        // Type relationships
+        Confidence<Ref<Type>> GetChildType() const;
+
+        // Function types
+        Confidence<Ref<CallingConvention>> GetCallingConvention() const;
+        std::vector<FunctionParameter> GetParameters() const;
+        Confidence<bool> HasVariableArguments() const;
+        Confidence<bool> CanReturn() const;
+
+        // Structure types
+        Ref<Structure> GetStructure() const;
+        std::vector<TypeMember> GetMembers() const;
+
+        // ... many more methods
+    };
+}
+```
+
+## Type Classes
+
+### Get Type Class
+
+```cpp
+BNTypeClass GetClass() const;
+```
+
+Returns the fundamental class of the type.
+
+**Type Classes:**
+- `VoidTypeClass` - void type
+- `BoolTypeClass` - boolean type
+- `IntegerTypeClass` - integer types
+- `FloatTypeClass` - floating-point types
+- `StructureTypeClass` - struct/class types
+- `EnumerationTypeClass` - enum types
+- `PointerTypeClass` - pointer types
+- `ArrayTypeClass` - array types
+- `FunctionTypeClass` - function types
+- `VarArgsTypeClass` - varargs (...)
+- `ValueTypeClass` - value type
+- `NamedTypeReferenceClass` - named type reference
+- `WideCharTypeClass` - wide character types
+
+**Example:**
+```cpp
+Ref<Type> type = func->GetType();
+
+switch (type->GetClass()) {
+    case FunctionTypeClass:
+        cout << "Function type" << endl;
+        break;
+    case PointerTypeClass:
+        cout << "Pointer type" << endl;
+        break;
+    case IntegerTypeClass:
+        cout << "Integer type" << endl;
+        break;
+    // ... handle other types
+}
+```
+
+## Creating Types
+
+### Void Type
+
+```cpp
+static Ref<Type> VoidType();
+```
+
+Creates a void type.
+
+### Integer Types
+
+```cpp
+static Ref<Type> IntegerType(size_t width, bool isSigned, 
+                             const std::string& altName = "");
+```
+
+Creates an integer type.
+
+**Example:**
+```cpp
+Ref<Type> int32 = Type::IntegerType(4, true);     // int32_t
+Ref<Type> uint64 = Type::IntegerType(8, false);   // uint64_t
+Ref<Type> byte = Type::IntegerType(1, false);     // uint8_t
+```
+
+### Float Types
+
+```cpp
+static Ref<Type> FloatType(size_t width, const std::string& altName = "");
+```
+
+Creates a floating-point type.
+
+**Example:**
+```cpp
+Ref<Type> float32 = Type::FloatType(4);   // float
+Ref<Type> double64 = Type::FloatType(8);  // double
+```
+
+### Pointer Types
+
+```cpp
+static Ref<Type> PointerType(Architecture* arch, 
+                             const Confidence<Ref<Type>>& type,
+                             bool isConst = false,
+                             bool isVolatile = false,
+                             BNReferenceType refType = PointerReferenceType);
+```
+
+Creates a pointer type.
+
+**Example:**
+```cpp
+Ref<Type> intPtr = Type::PointerType(arch, 
+    Confidence<Ref<Type>>(Type::IntegerType(4, true), 0));
+// int*
+
+Ref<Type> voidPtr = Type::PointerType(arch,
+    Confidence<Ref<Type>>(Type::VoidType(), 0));
+// void*
+```
+
+### Array Types
+
+```cpp
+static Ref<Type> ArrayType(const Confidence<Ref<Type>>& type, uint64_t count);
+```
+
+Creates an array type.
+
+**Example:**
+```cpp
+Ref<Type> charArray = Type::ArrayType(
+    Confidence<Ref<Type>>(Type::IntegerType(1, false), 0),
+    256);
+// char[256]
+```
+
+### Function Types
+
+```cpp
+static Ref<Type> FunctionType(
+    const Confidence<Ref<Type>>& returnValue,
+    const Confidence<Ref<CallingConvention>>& callingConvention,
+    const std::vector<FunctionParameter>& params,
+    bool hasVariableArguments = false,
+    Confidence<bool> canReturn = Confidence<bool>(true, 0));
+```
+
+Creates a function type.
+
+**Example:**
+```cpp
+std::vector<FunctionParameter> params;
+params.push_back(FunctionParameter(
+    Type::IntegerType(4, true),  // int
+    "argc"));
+params.push_back(FunctionParameter(
+    Type::PointerType(arch, 
+        Confidence<Ref<Type>>(Type::PointerType(arch,
+            Confidence<Ref<Type>>(Type::IntegerType(1, true), 0)), 0)),  // char**
+    "argv"));
+
+Ref<Type> mainType = Type::FunctionType(
+    Confidence<Ref<Type>>(Type::IntegerType(4, true), 0),  // return int
+    Confidence<Ref<CallingConvention>>(platform->GetDefaultCallingConvention(), 0),
+    params,
+    false  // no varargs
+);
+// int main(int argc, char** argv)
+```
+
+## Type Properties
+
+### Get Width
+
+```cpp
+uint64_t GetWidth() const;
+```
+
+Returns the size of the type in bytes.
+
+**Example:**
+```cpp
+Ref<Type> type = Type::IntegerType(4, true);
+cout << "Size: " << type->GetWidth() << " bytes" << endl;  // 4 bytes
+```
+
+### Get Alignment
+
+```cpp
+size_t GetAlignment() const;
+```
+
+Returns the alignment requirement of the type.
+
+### Check Signedness
+
+```cpp
+Confidence<bool> IsSigned() const;
+```
+
+Returns whether an integer type is signed.
+
+### Check Const/Volatile
+
+```cpp
+Confidence<bool> IsConst() const;
+Confidence<bool> IsVolatile() const;
+```
+
+Returns whether the type is const or volatile.
+
+## Function Types
+
+### Get Calling Convention
+
+```cpp
+Confidence<Ref<CallingConvention>> GetCallingConvention() const;
+```
+
+Returns the calling convention for a function type.
+
+### Get Parameters
+
+```cpp
+std::vector<FunctionParameter> GetParameters() const;
+```
+
+Returns the parameters of a function type.
+
+**Example:**
+```cpp
+Ref<Type> funcType = func->GetType();
+if (funcType && funcType->GetClass() == FunctionTypeClass) {
+    auto params = funcType->GetParameters();
+    
+    cout << "Function has " << params.size() << " parameters:" << endl;
+    for (const auto& param : params) {
+        cout << "  " << param.name << ": " 
+             << param.type->GetString() << endl;
+    }
+    
+    // Get return type
+    Ref<Type> returnType = funcType->GetChildType().GetValue();
+    cout << "Returns: " << returnType->GetString() << endl;
+}
+```
+
+### Check Variable Arguments
+
+```cpp
+Confidence<bool> HasVariableArguments() const;
+```
+
+Returns true if the function accepts variable arguments (varargs).
+
+### Check Return Capability
+
+```cpp
+Confidence<bool> CanReturn() const;
+```
+
+Returns true if the function can return (not marked `noreturn`).
+
+## Pointer and Array Types
+
+### Get Child Type
+
+```cpp
+Confidence<Ref<Type>> GetChildType() const;
+```
+
+For pointer and array types, returns the pointed-to or element type.
+
+**Example:**
+```cpp
+Ref<Type> ptrType = Type::PointerType(arch,
+    Confidence<Ref<Type>>(Type::IntegerType(4, true), 0));
+
+if (ptrType->GetClass() == PointerTypeClass) {
+    Ref<Type> elementType = ptrType->GetChildType().GetValue();
+    cout << "Points to: " << elementType->GetString() << endl;
+    // Points to: int32_t
+}
+```
+
+### Get Element Count (Arrays)
+
+```cpp
+uint64_t GetElementCount() const;
+```
+
+For array types, returns the number of elements.
+
+## Structure Types
+
+### Get Structure
+
+```cpp
+Ref<Structure> GetStructure() const;
+```
+
+For structure types, returns the Structure object.
+
+**Example:**
+```cpp
+Ref<Type> structType = bv->GetTypeByName(QualifiedName("MyStruct"));
+if (structType && structType->GetClass() == StructureTypeClass) {
+    Ref<Structure> structure = structType->GetStructure();
+    
+    cout << "Structure size: " << structure->GetWidth() << " bytes" << endl;
+    
+    for (const auto& member : structure->GetMembers()) {
+        cout << "  Member: " << member.name
+             << " at offset " << member.offset
+             << " (" << member.type->GetString() << ")" << endl;
+    }
+}
+```
+
+## Named Types
+
+### Get Type by Name
+
+```cpp
+Ref<Type> GetTypeByName(const QualifiedName& name);
+```
+
+Retrieves a named type from the binary view.
+
+**Example:**
+```cpp
+QualifiedName name("struct my_struct");
+Ref<Type> type = bv->GetTypeByName(name);
+
+if (type) {
+    cout << "Found type: " << type->GetString() << endl;
+}
+```
+
+### Define Type
+
+```cpp
+std::string DefineType(const std::string& id, 
+                       const QualifiedName& name, 
+                       Ref<Type> type);
+```
+
+Defines a new named type in the binary view.
+
+**Example:**
+```cpp
+// Create a structure
+StructureBuilder builder;
+builder.AddMember(Type::IntegerType(4, true), "field1");
+builder.AddMember(Type::IntegerType(4, false), "field2");
+Ref<Structure> structure = builder.Finalize();
+
+// Create a type from the structure
+Ref<Type> structType = Type::StructureType(structure);
+
+// Define it in the binary view
+QualifiedName name("MyStruct");
+std::string typeId = bv->DefineType(Type::GenerateAutoTypeId("source", name), 
+                                     name, 
+                                     structType);
+```
+
+## Type String Representation
+
+### Get Type String
+
+```cpp
+std::string GetString() const;
+std::string GetStringBeforeName() const;
+std::string GetStringAfterName() const;
+```
+
+Get string representations of types.
+
+**Example:**
+```cpp
+Ref<Type> type = Type::PointerType(arch,
+    Confidence<Ref<Type>>(Type::IntegerType(4, true), 0));
+
+cout << type->GetString() << endl;  // "int32_t*"
+```
+
+## Working with Structures
+
+### StructureBuilder
+
+```cpp
+class StructureBuilder {
+public:
+    StructureBuilder();
+    
+    void AddMember(const Confidence<Ref<Type>>& type, 
+                   const std::string& name);
+    void AddMemberAtOffset(const Confidence<Ref<Type>>& type,
+                          const std::string& name,
+                          uint64_t offset);
+    
+    Ref<Structure> Finalize();
+    // ... more methods
+};
+```
+
+**Example:**
+```cpp
+StructureBuilder builder;
+
+// Add members
+builder.AddMember(Type::IntegerType(4, true), "x");
+builder.AddMember(Type::IntegerType(4, true), "y");
+builder.AddMember(Type::PointerType(arch,
+    Confidence<Ref<Type>>(Type::IntegerType(1, true), 0)), "name");
+
+// Finalize the structure
+Ref<Structure> pointStruct = builder.Finalize();
+
+// Create a type from it
+Ref<Type> pointType = Type::StructureType(pointStruct);
+
+// Define it
+QualifiedName name("Point");
+bv->DefineType(Type::GenerateAutoTypeId("source", name), 
+               name, 
+               pointType);
+```
+
+## Complete Example
+
+Here's a complete example working with types:
+
+```cpp
+#include "binaryninjaapi.h"
+#include <iostream>
+
+using namespace BinaryNinja;
+using namespace std;
+
+void PrintType(Ref<Type> type, const string& prefix = "") {
+    cout << prefix << "Type: " << type->GetString() << endl;
+    cout << prefix << "Size: " << type->GetWidth() << " bytes" << endl;
+    cout << prefix << "Class: " << type->GetClass() << endl;
+    
+    if (type->GetClass() == FunctionTypeClass) {
+        auto params = type->GetParameters();
+        cout << prefix << "Parameters (" << params.size() << "):" << endl;
+        for (const auto& p : params) {
+            cout << prefix << "  " << p.name << ": " 
+                 << p.type->GetString() << endl;
+        }
+        
+        Ref<Type> ret = type->GetChildType().GetValue();
+        cout << prefix << "Returns: " << ret->GetString() << endl;
+    }
+    else if (type->GetClass() == StructureTypeClass) {
+        Ref<Structure> s = type->GetStructure();
+        for (const auto& m : s->GetMembers()) {
+            cout << prefix << "  +" << hex << m.offset << ": "
+                 << m.name << " (" << m.type->GetString() << ")" << endl;
+        }
+    }
+}
+
+int main(int argc, char* argv[]) {
+    SetBundledPluginDirectory(GetBundledPluginDirectory());
+    InitPlugins();
+
+    Ref<BinaryView> bv = BinaryNinja::Load(argv[1]);
+    if (!bv) return -1;
+
+    // Analyze function types
+    for (auto func : bv->GetAnalysisFunctionList()) {
+        cout << "\nFunction: " << func->GetSymbol()->GetFullName() << endl;
+        
+        Ref<Type> type = func->GetType();
+        if (type) {
+            PrintType(type, "  ");
+        }
+    }
+
+    // List all named types
+    cout << "\nNamed Types:" << endl;
+    for (const auto& pair : bv->GetTypes()) {
+        cout << "  " << pair.first.GetString() 
+             << ": " << pair.second->GetString() << endl;
+    }
+
+    bv->GetFile()->Close();
+    BNShutdown();
+    return 0;
+}
+```
+
+## See Also
+
+- [Function Class](/api/cpp/function) - Function type signatures
+- [BinaryView Class](/api/cpp/binaryview) - Type management in binaries
+- [Structure and Enumeration Documentation](/guide/types)

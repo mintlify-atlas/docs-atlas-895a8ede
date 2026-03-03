@@ -1,0 +1,362 @@
+---
+title: BinaryView API
+description: Access and manipulate binary files, segments, sections, and data
+---
+
+The `BinaryView` class is the primary interface for working with binary files in Binary Ninja. It provides access to file data, segments, sections, functions, symbols, types, and more.
+
+## Overview
+
+A `BinaryView` represents a view of a binary file with analysis information. Multiple views can exist for the same file (e.g., Raw, PE, ELF, Mach-O).
+
+### Opening Binary Files
+
+```python
+from binaryninja import load
+
+# Basic loading
+bv = load("/bin/ls")
+
+# With options
+bv = load("/path/to/binary", options={
+    'analysis.mode': 'full',
+    'analysis.linearSweep.autorun': True
+})
+
+# Always close when done (headless scripts)
+bv.file.close()
+```
+
+## BinaryView Class
+
+### Key Properties
+
+<ParamField path="file" type="FileMetadata">
+  File metadata associated with this view
+</ParamField>
+
+<ParamField path="start" type="int">
+  Start address of the binary
+</ParamField>
+
+<ParamField path="entry_point" type="int">
+  Entry point address
+</ParamField>
+
+<ParamField path="arch" type="Architecture">
+  Default architecture for this binary
+</ParamField>
+
+<ParamField path="platform" type="Platform">
+  Platform (OS and architecture combination)
+</ParamField>
+
+<ParamField path="endianness" type="Endianness">
+  Byte order (LittleEndian or BigEndian)
+</ParamField>
+
+<ParamField path="functions" type="FunctionList">
+  List of all functions in the binary
+</ParamField>
+
+<ParamField path="symbols" type="SymbolMapping">
+  Dictionary-like access to symbols by name
+</ParamField>
+
+<ParamField path="types" type="TypeMapping">
+  Dictionary-like access to defined types
+</ParamField>
+
+<ParamField path="strings" type="list[StringReference]">
+  All strings found in the binary
+</ParamField>
+
+### Reading Data
+
+```python
+# Read bytes
+data = bv.read(address, length)
+
+# Read integer (respects endianness)
+value = bv.read_int(address, size=4, sign=False)
+
+# Read pointer
+ptr = bv.read_pointer(address)
+
+# Check if address is valid
+if bv.is_valid_offset(address):
+    data = bv.read(address, 16)
+```
+
+<ParamField path="read" type="(address: int, length: int) -> bytes">
+  Read raw bytes from the binary
+  
+  <Expandable title="Parameters">
+    <ResponseField name="address" type="int" required>
+      Address to read from
+    </ResponseField>
+    <ResponseField name="length" type="int" required>
+      Number of bytes to read
+    </ResponseField>
+  </Expandable>
+  
+  Returns the bytes read, or empty bytes if address is invalid
+</ParamField>
+
+<ParamField path="read_int" type="(address: int, size: int, sign: bool = False) -> int">
+  Read an integer value at the given address
+  
+  <Expandable title="Parameters">
+    <ResponseField name="address" type="int" required>
+      Address to read from
+    </ResponseField>
+    <ResponseField name="size" type="int" required>
+      Size in bytes (1, 2, 4, or 8)
+    </ResponseField>
+    <ResponseField name="sign" type="bool">
+      Whether the integer is signed (default: False)
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+### Writing Data
+
+<Warning>
+Writing data modifies the binary and creates undo entries. Use with caution.
+</Warning>
+
+```python
+# Write bytes
+bv.write(address, b"\x90\x90\x90\x90")
+
+# Write integer
+bv.write_int(address, 0x12345678, size=4, sign=False)
+
+# Write pointer
+bv.write_pointer(address, 0x401000)
+```
+
+### Working with Functions
+
+```python
+# Get all functions
+for func in bv.functions:
+    print(f"{func.name} @ {func.start:#x}")
+
+# Get function at address
+func = bv.get_function_at(0x401000)
+
+# Get functions by name
+funcs = bv.get_functions_by_name("main")
+
+# Create a new function
+bv.add_function(0x402000)
+
+# Remove a function
+bv.remove_function(func)
+```
+
+<ParamField path="get_function_at" type="(addr: int) -> Optional[Function]">
+  Get the function containing the given address
+  
+  <Expandable title="Parameters">
+    <ResponseField name="addr" type="int" required>
+      Address within the function
+    </ResponseField>
+  </Expandable>
+  
+  Returns the Function object, or None if no function exists at that address
+</ParamField>
+
+<ParamField path="add_function" type="(addr: int, platform: Optional[Platform] = None) -> Function">
+  Create a new function at the specified address
+  
+  <Expandable title="Parameters">
+    <ResponseField name="addr" type="int" required>
+      Start address for the new function
+    </ResponseField>
+    <ResponseField name="platform" type="Platform">
+      Platform to use (default: binary's platform)
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+### Working with Symbols
+
+```python
+# Get symbol by name
+sym = bv.symbols['main']
+print(f"Symbol: {sym.name} at {sym.address:#x}")
+
+# Get symbol at address
+sym = bv.get_symbol_at(0x401000)
+
+# Define a new symbol
+from binaryninja.types import Symbol, SymbolType
+sym = Symbol(SymbolType.FunctionSymbol, 0x402000, "my_function")
+bv.define_user_symbol(sym)
+
+# Get all symbols
+for sym in bv.get_symbols():
+    print(f"{sym.type.name}: {sym.name} @ {sym.address:#x}")
+```
+
+### Working with Types
+
+```python
+# Define a structure type
+from binaryninja import Type
+
+struct = Type.structure([
+    (Type.int(4), "field1"),
+    (Type.pointer(bv.arch, Type.char()), "field2")
+])
+bv.define_user_type("MyStruct", struct)
+
+# Get a type
+my_type = bv.types['MyStruct']
+
+# Apply type to data
+bv.define_user_data_var(0x404000, my_type)
+```
+
+### Segments and Sections
+
+```python
+# Get segments
+for segment in bv.segments:
+    print(f"Segment: {segment.start:#x}-{segment.end:#x}")
+    print(f"  Readable: {segment.readable}")
+    print(f"  Writable: {segment.writable}")
+    print(f"  Executable: {segment.executable}")
+
+# Get sections
+for section in bv.sections:
+    print(f"Section: {section.name}")
+    print(f"  Start: {section.start:#x}")
+    print(f"  Length: {section.length:#x}")
+```
+
+### String References
+
+```python
+# Get all strings
+for string_ref in bv.strings:
+    print(f"{string_ref.start:#x}: {string_ref.value}")
+
+# Search for specific string
+for string_ref in bv.strings:
+    if "password" in string_ref.value.lower():
+        print(f"Found at {string_ref.start:#x}: {string_ref.value}")
+```
+
+## StringReference Class
+
+<ParamField path="start" type="int">
+  Address where the string begins
+</ParamField>
+
+<ParamField path="length" type="int">
+  Length of the string in bytes
+</ParamField>
+
+<ParamField path="value" type="str">
+  The decoded string value
+</ParamField>
+
+<ParamField path="type" type="StringType">
+  String encoding type (AsciiString, Utf8String, etc.)
+</ParamField>
+
+## Data Variables
+
+Data variables represent typed data in the binary (3.0 API enhancements).
+
+```python
+# Get data variable at address
+data_var = bv.get_data_var_at(0x404000)
+
+# Set name (new in 3.0)
+data_var.name = "global_config"
+
+# Set type
+data_var.type = Type.int(4)
+
+# Read value (new in 3.0)
+value = data_var.value
+print(f"Value: {value}")
+
+# For structures, access fields
+if data_var.type.type_class == TypeClass.StructureTypeClass:
+    field_value = data_var['field_name'].value
+```
+
+## Notifications
+
+Register callbacks for binary modifications:
+
+```python
+from binaryninja import BinaryDataNotification, NotificationType
+
+class MyNotification(BinaryDataNotification):
+    def __init__(self):
+        super().__init__(
+            NotificationType.FunctionAdded | 
+            NotificationType.DataVariableAdded
+        )
+    
+    def function_added(self, view, func):
+        print(f"Function added: {func.name}")
+    
+    def data_var_added(self, view, var):
+        print(f"Data variable added at {var.address:#x}")
+
+bv.register_notification(MyNotification())
+```
+
+## Example: Binary Analysis Script
+
+```python
+from binaryninja import load, LogLevel, log_to_stdout
+
+def analyze_binary(path):
+    # Enable logging
+    log_to_stdout(LogLevel.InfoLog)
+    
+    # Load binary
+    bv = load(path)
+    if not bv:
+        print(f"Failed to load {path}")
+        return
+    
+    print(f"Binary: {bv.file.filename}")
+    print(f"Architecture: {bv.arch.name}")
+    print(f"Platform: {bv.platform.name}")
+    print(f"Entry point: {bv.entry_point:#x}")
+    print(f"Functions: {len(bv.functions)}")
+    print(f"Strings: {len(bv.strings)}")
+    
+    # Find interesting functions
+    for func in bv.functions:
+        if any(call in func.name.lower() 
+               for call in ['system', 'exec', 'strcpy']):
+            print(f"Interesting function: {func.name} @ {func.start:#x}")
+    
+    # Find strings
+    for string_ref in bv.strings:
+        if any(keyword in string_ref.value.lower() 
+               for keyword in ['password', 'key', 'secret']):
+            print(f"Interesting string at {string_ref.start:#x}: "
+                  f"{string_ref.value}")
+    
+    bv.file.close()
+
+if __name__ == "__main__":
+    analyze_binary("/bin/ls")
+```
+
+## See Also
+
+- [Function API](/api/python/function) - Working with functions
+- [Types API](/api/python/types) - Type system
+- [Architecture API](/api/python/architecture) - CPU architectures

@@ -1,0 +1,167 @@
+---
+title: Intermediate languages (Rust)
+description: Rust API for LLIL, MLIL, and HLIL
+---
+
+Binary Ninja provides three levels of intermediate languages in Rust: Low Level IL (LLIL), Medium Level IL (MLIL), and High Level IL (HLIL).
+
+## IL levels
+
+<CardGroup cols={3}>
+  <Card title="LLIL" icon="1">
+    Low-level, close to assembly
+  </Card>
+  <Card title="MLIL" icon="2">
+    Medium-level with variables
+  </Card>
+  <Card title="HLIL" icon="3">
+    High-level, decompiled C-like
+  </Card>
+</CardGroup>
+
+## Low Level IL
+
+```rust
+use binaryninja::low_level_il::{LowLevelILFunction, LowLevelILOperation};
+
+// Get LLIL for function
+let llil = func.low_level_il()?;
+
+// Iterate instructions
+for instr in llil.instructions() {
+    println!("{:#x}: {:?}", instr.address, instr.kind);
+
+    // Match on operation
+    match instr.kind {
+        LowLevelILOperation::SetReg { dest, src } => {
+            println!("  Set register {} = {:?}", dest, src);
+        }
+        LowLevelILOperation::Call { dest } => {
+            println!("  Call {:?}", dest);
+        }
+        _ => {}
+    }
+}
+```
+
+## Medium Level IL
+
+```rust
+use binaryninja::medium_level_il::MediumLevelILFunction;
+
+// Get MLIL for function
+let mlil = func.medium_level_il()?;
+
+// Iterate instructions
+for instr in mlil.instructions() {
+    println!("{:?}", instr);
+
+    // Access variables
+    if let Some(var) = instr.variable() {
+        println!("  Uses variable: {}", var.name());
+    }
+}
+```
+
+## High Level IL
+
+```rust
+use binaryninja::high_level_il::HighLevelILFunction;
+
+// Get HLIL for function
+let hlil = func.high_level_il()?;
+
+// Iterate instructions
+for instr in hlil.instructions() {
+    println!("{:?}", instr);
+}
+
+// Get as AST
+let root = hlil.root();
+println!("Function AST: {:?}", root);
+```
+
+## SSA forms
+
+All IL levels support SSA (Static Single Assignment) form:
+
+```rust
+// Get SSA form
+let llil_ssa = llil.ssa_form()?;
+let mlil_ssa = mlil.ssa_form()?;
+let hlil_ssa = hlil.ssa_form()?;
+
+// Iterate SSA instructions
+for instr in mlil_ssa.instructions() {
+    println!("SSA: {:?}", instr);
+}
+```
+
+## IL visitor pattern
+
+From [`rust/examples/medium_level_il.rs`](https://github.com/Vector35/binaryninja-api/blob/dev/rust/examples/medium_level_il.rs):
+
+```rust
+use binaryninja::medium_level_il::*;
+
+fn visit_mlil(func: &Function) {
+    let mlil = func.medium_level_il().unwrap();
+
+    for block in mlil.basic_blocks().iter() {
+        for instr in block.iter() {
+            match instr.kind {
+                MediumLevelILInstr::SetVar(op) => {
+                    println!("Set var: {} = {:?}", op.dest, op.src);
+                }
+                MediumLevelILInstr::If(op) => {
+                    println!("If: {:?}", op.condition);
+                }
+                MediumLevelILInstr::Call(op) => {
+                    println!("Call: {:?}", op.dest);
+                }
+                _ => {}
+            }
+        }
+    }
+}
+```
+
+## Complete example
+
+```rust
+use binaryninja::headless::Session;
+use binaryninja::binary_view::BinaryViewExt;
+use binaryninja::high_level_il::HighLevelILInstr;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let session = Session::new()?;
+    let bv = session.load("/bin/ls")?;
+
+    // Analyze first function
+    if let Some(func) = bv.functions().first() {
+        println!("=== {} ===", func.symbol().full_name());
+
+        // Get HLIL
+        if let Ok(hlil) = func.high_level_il() {
+            for (i, instr) in hlil.instructions().take(10).enumerate() {
+                println!("{}: {:?}", i, instr);
+            }
+        }
+    }
+
+    Ok(())
+}
+```
+
+From [`rust/examples/high_level_il.rs`](https://github.com/Vector35/binaryninja-api/blob/dev/rust/examples/high_level_il.rs)
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Functions" href="/api/rust/function">
+    Analyze functions
+  </Card>
+  <Card title="Examples" href="/examples/custom-il-visitor">
+    See complete IL examples
+  </Card>
+</CardGroup>

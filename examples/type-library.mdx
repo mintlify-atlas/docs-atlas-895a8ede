@@ -1,0 +1,473 @@
+---
+title: Type Library Creation
+description: Learn how to create and manage type libraries for sharing type definitions across projects
+---
+
+This example demonstrates how to create custom type libraries in Binary Ninja, which are reusable collections of type definitions for structures, enums, functions, and more.
+
+## Overview
+
+The `typelib_create.py` example shows how to:
+- Create a new type library
+- Add various type classes (void, bool, int, float, pointer, struct, enum, array, function)
+- Handle forward references and recursive types
+- Add named objects (external function signatures)
+- Finalize and save type libraries
+
+## Complete Source Code
+
+```python
+#!/usr/bin/env python
+# demonstrate creating a type library
+
+import binaryninja
+from binaryninja.enums import NamedTypeReferenceClass
+from binaryninja.types import Type, NamedTypeReferenceType, StructureBuilder, EnumerationBuilder
+
+arch = binaryninja.Architecture['x86_64']
+typelib = binaryninja.typelibrary.TypeLibrary.new(arch, 'libtest.so.1')
+typelib.add_platform(binaryninja.Platform['mac-x86_64'])
+typelib.add_alternate_name('libtest.so')
+
+#------------------------------------------------------------------------------
+# PART1: Named Types
+#------------------------------------------------------------------------------
+
+# example: VoidTypeClass
+typelib.add_named_type('MyVoidType', Type.void())
+
+# example: BoolTypeClass
+typelib.add_named_type('MyBoolType', Type.bool())
+
+# example: IntegerTypeClass
+typelib.add_named_type('MyCharType', Type.char())
+typelib.add_named_type('MyIntType', Type.int(4, True))
+typelib.add_named_type('MyUnsignedIntType', Type.int(4, False))
+
+# example: FloatTypeClass
+typelib.add_named_type('MyFloatType', Type.float(4))
+
+# example: PointerTypeClass
+# char *
+typelib.add_named_type('MyPointerType', Type.pointer(arch, Type.char()))
+
+# example of typedef to primitive type
+# typedef int MyTypedefType;
+typelib.add_named_type('MyTypedefType', Type.int(4))
+
+# example of typedef to typedef
+# typedef MyTypedefType MySuperSpecialType;
+def create_named_type_reference(type_name: str, to_what: NamedTypeReferenceClass):
+    return NamedTypeReferenceType.create(named_type_class=to_what, guid=None, name=type_name)
+
+typelib.add_named_type(
+  'MySuperSpecialType', create_named_type_reference('MySpecialType', NamedTypeReferenceClass.TypedefNamedTypeClass)
+)
+
+# We can demonstrate three type classes in the following example:
+#   StructureTypeClass, PointerTypeClass, NamedTypeReferenceClass
+
+# add a named type "Rectangle":
+#
+# struct
+# {
+#     int width;
+#     int height;
+#     struct Point *center; // pointer to possibly undeclared struct
+# }
+
+with StructureBuilder.builder(typelib, 'Rectangle') as struct_type:
+    struct_type.append(Type.int(4), 'width')
+    struct_type.append(Type.int(4), 'height')
+    struct_type.append(
+      Type.pointer(arch, create_named_type_reference('Point', NamedTypeReferenceClass.StructNamedTypeClass)), 'center'
+    )
+
+# add a named type "Rectangle2":
+# this type cannot be applied to variables until struct Point is declared
+#
+# struct
+# {
+#     int width;
+#     int height;
+#     struct Point center; // actual undeclared struct
+# }
+
+with StructureBuilder.builder(typelib, 'Rectangle2') as struct_type:
+    struct_type.append(Type.int(4), 'width')
+    struct_type.append(Type.int(4), 'height')
+    struct_type.append(create_named_type_reference('Point', NamedTypeReferenceClass.StructNamedTypeClass), 'center')
+
+# example: EnumerationTypeClass
+enum_type = EnumerationBuilder.create([], None, arch=arch)
+enum_type.append('RED', 0)
+enum_type.append('ORANGE', 1)
+enum_type.append('YELLOW', 2)
+enum_type.append('GREEN', 3)
+enum_type.append('BLUE', 4)
+enum_type.append('INDIGO', 5)
+enum_type.append('VIOLET', 6)
+typelib.add_named_type('MyEnumerationType', enum_type)
+
+# example: ArrayTypeClass
+#
+# unsigned char[256]
+typelib.add_named_type('MyArrayType', Type.array(Type.int(1), 256))
+
+# example: FunctionTypeClass
+#
+# int ()(int, int, int)
+ret = Type.int(4)
+params = [Type.int(4), Type.int(4), Type.int(4)]
+ftype = Type.function(ret, params)
+typelib.add_named_type('MyFunctionType', ftype)
+
+#------------------------------------------------------------------------------
+# PART2: Named Objects
+#------------------------------------------------------------------------------
+
+# example: any external/imported functions named _MySuperComputation
+#  are typed int _MySuperComputation(int, int)
+
+ret = Type.int(4)
+params = [Type.int(4), Type.int(4)]
+ftype = Type.function(ret, params)
+typelib.add_named_object('_MySuperComputation', ftype)
+
+# finalize
+typelib.finalize()
+print('writing test.bntl')
+typelib.write_to_file('test.bntl')
+```
+
+## Key Concepts Explained
+
+<Steps>
+
+### Create a Type Library
+
+```python
+arch = binaryninja.Architecture['x86_64']
+typelib = binaryninja.typelibrary.TypeLibrary.new(arch, 'libtest.so.1')
+typelib.add_platform(binaryninja.Platform['mac-x86_64'])
+typelib.add_alternate_name('libtest.so')
+```
+
+Initialize a new type library:
+- Specify target architecture (affects type sizes and alignment)
+- Provide library name (typically the shared library filename)
+- Add compatible platforms
+- Add alternate names for library matching
+
+### Add Primitive Types
+
+```python
+# Void type
+typelib.add_named_type('MyVoidType', Type.void())
+
+# Boolean type
+typelib.add_named_type('MyBoolType', Type.bool())
+
+# Integer types
+typelib.add_named_type('MyCharType', Type.char())
+typelib.add_named_type('MyIntType', Type.int(4, True))  # 4 bytes, signed
+typelib.add_named_type('MyUnsignedIntType', Type.int(4, False))  # 4 bytes, unsigned
+
+# Floating point types
+typelib.add_named_type('MyFloatType', Type.float(4))  # 4 bytes
+```
+
+Define basic type aliases:
+- `Type.void()` - Void type
+- `Type.bool()` - Boolean type
+- `Type.char()` - Character type
+- `Type.int(size, signed)` - Integer types
+- `Type.float(size)` - Floating point types
+
+### Add Pointer Types
+
+```python
+# char *
+typelib.add_named_type('MyPointerType', Type.pointer(arch, Type.char()))
+```
+
+Create pointer types:
+- First parameter: Architecture (determines pointer size)
+- Second parameter: Target type
+- Pointers can point to any type, including structs and typedefs
+
+### Create Typedefs
+
+```python
+# typedef int MyTypedefType;
+typelib.add_named_type('MyTypedefType', Type.int(4))
+
+# typedef MyTypedefType MySuperSpecialType;
+def create_named_type_reference(type_name: str, to_what: NamedTypeReferenceClass):
+    return NamedTypeReferenceType.create(
+        named_type_class=to_what, 
+        guid=None, 
+        name=type_name
+    )
+
+typelib.add_named_type(
+    'MySuperSpecialType',
+    create_named_type_reference('MySpecialType', NamedTypeReferenceClass.TypedefNamedTypeClass)
+)
+```
+
+Typedefs create aliases:
+- Direct typedefs: Just add the target type with a new name
+- Typedef chains: Use `NamedTypeReferenceType` to reference another typedef
+- Specify reference class: `TypedefNamedTypeClass`, `StructNamedTypeClass`, etc.
+
+### Define Structures
+
+```python
+with StructureBuilder.builder(typelib, 'Rectangle') as struct_type:
+    struct_type.append(Type.int(4), 'width')
+    struct_type.append(Type.int(4), 'height')
+    struct_type.append(
+        Type.pointer(arch, create_named_type_reference('Point', NamedTypeReferenceClass.StructNamedTypeClass)),
+        'center'
+    )
+```
+
+Build structure types:
+- Use `StructureBuilder.builder(typelib, name)` context manager
+- `append(type, name)` - Add fields in order
+- Fields can reference other types, including forward references
+- Structures are automatically added to the type library
+
+### Handle Forward References
+
+```python
+# This struct references 'Point' which may not be defined yet
+with StructureBuilder.builder(typelib, 'Rectangle') as struct_type:
+    struct_type.append(
+        Type.pointer(arch, create_named_type_reference('Point', NamedTypeReferenceClass.StructNamedTypeClass)),
+        'center'
+    )
+```
+
+Forward references allow:
+- Referencing types before they're defined
+- Circular references (e.g., linked lists)
+- **Pointers** to undefined types are always valid
+- **Direct embedding** requires the type to be defined
+
+### Create Enumerations
+
+```python
+enum_type = EnumerationBuilder.create([], None, arch=arch)
+enum_type.append('RED', 0)
+enum_type.append('ORANGE', 1)
+enum_type.append('YELLOW', 2)
+enum_type.append('GREEN', 3)
+enum_type.append('BLUE', 4)
+enum_type.append('INDIGO', 5)
+enum_type.append('VIOLET', 6)
+typelib.add_named_type('MyEnumerationType', enum_type)
+```
+
+Define enumeration types:
+- Create with `EnumerationBuilder.create()`
+- Add members with `append(name, value)`
+- Values can be any integer
+- Add to library with `add_named_type()`
+
+### Define Array Types
+
+```python
+# unsigned char[256]
+typelib.add_named_type('MyArrayType', Type.array(Type.int(1), 256))
+```
+
+Create array types:
+- `Type.array(element_type, count)`
+- Element type can be any type
+- Count is the number of elements
+
+### Define Function Types
+
+```python
+# int ()(int, int, int)
+ret = Type.int(4)
+params = [Type.int(4), Type.int(4), Type.int(4)]
+ftype = Type.function(ret, params)
+typelib.add_named_type('MyFunctionType', ftype)
+```
+
+Create function pointer types:
+- Specify return type
+- Provide list of parameter types
+- Use `Type.function(return_type, params)`
+
+### Add Named Objects (External Functions)
+
+```python
+# int _MySuperComputation(int, int)
+ret = Type.int(4)
+params = [Type.int(4), Type.int(4)]
+ftype = Type.function(ret, params)
+typelib.add_named_object('_MySuperComputation', ftype)
+```
+
+Named objects provide signatures for external functions:
+- Used for imports/exports
+- Automatically applied when Binary Ninja finds matching symbols
+- Improves analysis of library calls
+
+### Finalize and Save
+
+```python
+typelib.finalize()
+typelib.write_to_file('test.bntl')
+```
+
+Complete the type library:
+- `finalize()` - Validates and locks the type library
+- `write_to_file(path)` - Save to `.bntl` file
+- Libraries can be loaded in Binary Ninja or other scripts
+
+</Steps>
+
+## Running the Example
+
+```bash
+python typelib_create.py
+```
+
+This creates `test.bntl` in the current directory.
+
+## Loading Type Libraries
+
+### In the UI
+
+1. Go to `View > Types`
+2. Click `Import Type Library`
+3. Select your `.bntl` file
+4. Types are now available for use
+
+### In a Script
+
+```python
+import binaryninja as bn
+
+bv = bn.load("/path/to/binary")
+
+# Load type library
+typelib = bn.typelibrary.TypeLibrary.load_from_file("test.bntl")
+bv.add_type_library(typelib)
+
+# Types are now available
+rectangle_type = bv.get_type_by_name("Rectangle")
+```
+
+## Advanced Type Library Features
+
+### Platform-Specific Types
+
+```python
+# Create library for specific platform
+typelib = bn.typelibrary.TypeLibrary.new(
+    bn.Architecture['x86_64'],
+    'windows_api'
+)
+typelib.add_platform(bn.Platform['windows-x86_64'])
+
+# Add Windows-specific types
+with StructureBuilder.builder(typelib, 'HANDLE') as s:
+    s.append(Type.pointer(bn.Architecture['x86_64'], Type.void()), 'ptr')
+```
+
+### Version Management
+
+```python
+# Set library version information
+typelib.version = "1.0.0"
+typelib.dependency_name = "libc.so.6"
+```
+
+### Metadata
+
+```python
+# Add metadata to types
+typelib.add_named_type('ImportantStruct', struct_type)
+typelib.query_type('ImportantStruct').metadata['description'] = 'Critical structure'
+```
+
+### Exporting Type Libraries from Binaries
+
+```python
+import binaryninja as bn
+
+# Load binary with well-defined types
+bv = bn.load("/path/to/library.so")
+
+# Create type library from binary
+typelib = bn.typelibrary.TypeLibrary.new(bv.arch, bv.file.filename)
+typelib.add_platform(bv.platform)
+
+# Export all user-defined types
+for name in bv.types:
+    type_obj = bv.types[name]
+    typelib.add_named_type(name, type_obj)
+
+# Export function signatures
+for func in bv.functions:
+    if func.symbol and func.symbol.exported:
+        typelib.add_named_object(func.symbol.name, func.type)
+
+typelib.finalize()
+typelib.write_to_file(f"{bv.file.filename}.bntl")
+```
+
+## Type Library Best Practices
+
+### Organization
+
+```python
+# Group related types
+typelib.add_named_type('network_socket_t', Type.int(4))
+typelib.add_named_type('network_address_t', Type.int(4, False))
+typelib.add_named_type('network_port_t', Type.int(2, False))
+
+with StructureBuilder.builder(typelib, 'network_connection') as s:
+    s.append(Type.named_type_from_type('network_socket_t'), 'socket')
+    s.append(Type.named_type_from_type('network_address_t'), 'address')
+    s.append(Type.named_type_from_type('network_port_t'), 'port')
+```
+
+### Documentation
+
+```python
+# Use descriptive names
+typelib.add_named_type('file_descriptor_t', Type.int(4))
+# Not: typelib.add_named_type('fd', Type.int(4))
+
+# Create comprehensive function signatures
+ret = Type.int(4)
+params = [
+    Type.pointer(arch, Type.char()),  # filename
+    Type.int(4),                       # flags
+    Type.int(4)                        # mode
+]
+open_func = Type.function(ret, params)
+typelib.add_named_object('open', open_func)
+```
+
+## Use Cases
+
+- **Library Headers** - Create type libraries for system libraries
+- **API Documentation** - Share type definitions across projects
+- **Malware Analysis** - Standardize types for malware families
+- **Firmware Analysis** - Define hardware register structures
+- **Protocol Analysis** - Define packet structures
+- **Game Modding** - Share game engine type definitions
+
+## Related Examples
+
+- [Basic Analysis](/examples/basic-analysis) - Using type libraries in analysis
+- [Binary View Loader](/examples/binary-view-loader) - Custom format type definitions
+- [Headless Automation](/examples/headless-automation) - Automated type library usage

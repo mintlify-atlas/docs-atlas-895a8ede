@@ -1,0 +1,320 @@
+---
+title: Architecture plugins
+description: Create plugins for new CPU architectures
+---
+
+Architecture plugins add support for new instruction sets to Binary Ninja. They define how to disassemble, lift to IL, and analyze code for a specific CPU architecture.
+
+## When to create an architecture plugin
+
+Create an architecture plugin when:
+- You need to analyze binaries for an unsupported architecture
+- You want to add architecture-specific analysis improvements
+- You're working with custom or proprietary instruction sets
+
+<Note>
+  Binary Ninja includes built-in support for x86, x86_64, ARM64, ARMv7, MIPS, PPC, RISC-V, and MSP430.
+</Note>
+
+## Architecture hooks vs. new architectures
+
+Before creating a full architecture plugin, consider if an **architecture hook** is sufficient:
+
+```python arch_hook.py
+from binaryninja.architecture import Architecture, ArchitectureHook
+
+class X86ReturnHook(ArchitectureHook):
+    def get_instruction_text(self, data, addr):
+        # Call the original implementation
+        result, length = super().get_instruction_text(data, addr)
+
+        # Patch the name of 'retn' to 'ret'
+        if len(result) > 0 and result[0].text == 'retn':
+            result[0].text = 'ret'
+
+        return result, length
+
+# Install the hook
+X86ReturnHook(Architecture['x86']).register()
+```
+
+<Info>
+  Architecture hooks modify existing architectures. Use them for:
+  - Changing instruction mnemonics
+  - Adding custom instruction annotations
+  - Modifying flag behavior
+</Info>
+
+From [`python/examples/arch_hook.py`](https://github.com/Vector35/binaryninja-api/blob/dev/python/examples/arch_hook.py)
+
+## Creating a new architecture
+
+A complete architecture plugin must implement:
+
+1. **Instruction disassembly** - Convert bytes to instructions
+2. **IL lifting** - Translate instructions to LLIL
+3. **Register definitions** - Define CPU registers
+4. **Flag definitions** - Define status flags
+5. **Calling conventions** - Define function calling conventions
+
+## Architecture class structure
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    from binaryninja import Architecture, InstructionInfo, InstructionTextToken
+    from binaryninja.enums import BranchType, InstructionTextTokenType
+
+    class MyArchitecture(Architecture):
+        name = "my_arch"
+        address_size = 4  # 32-bit architecture
+        default_int_size = 4
+        instr_alignment = 4  # Instructions are 4-byte aligned
+        max_instr_length = 4
+
+        # Define registers
+        regs = {
+            'r0': RegisterIndex(0),
+            'r1': RegisterIndex(1),
+            # ... more registers
+        }
+
+        # Define stack pointer
+        stack_pointer = 'sp'
+
+        # Define flags
+        flags = ['z', 'n', 'c', 'v']  # Zero, Negative, Carry, Overflow
+
+        def get_instruction_info(self, data, addr):
+            """Decode instruction and return branch info"""
+            result = InstructionInfo()
+            result.length = 4  # Instruction length
+
+            # Decode instruction
+            opcode = struct.unpack('>I', data[:4])[0]
+
+            # Set branch info for control flow
+            if is_branch(opcode):
+                result.add_branch(BranchType.UnconditionalBranch, target)
+
+            return result
+
+        def get_instruction_text(self, data, addr):
+            """Disassemble instruction to text"""
+            tokens = []
+            opcode = struct.unpack('>I', data[:4])[0]
+
+            # Create instruction tokens
+            tokens.append(InstructionTextToken(
+                InstructionTextTokenType.InstructionToken,
+                "add"
+            ))
+            tokens.append(InstructionTextToken(
+                InstructionTextTokenType.OperandSeparatorToken,
+                " "
+            ))
+            # ... add operand tokens
+
+            return tokens, 4  # Return tokens and instruction length
+
+        def get_instruction_low_level_il(self, data, addr, il):
+            """Lift instruction to LLIL"""
+            opcode = struct.unpack('>I', data[:4])[0]
+
+            # Lift to LLIL
+            if opcode_is_add(opcode):
+                il.append(il.set_reg(
+                    4,  # Size
+                    dest_reg,
+                    il.add(4,
+                        il.reg(4, src1_reg),
+                        il.reg(4, src2_reg)
+                    )
+                ))
+
+            return 4  # Instruction length
+
+    # Register the architecture
+    MyArchitecture.register()
+    ```
+  </Tab>
+  <Tab title="C++">
+    ```cpp
+    #include "binaryninjaapi.h"
+
+    using namespace BinaryNinja;
+
+    class MyArchitecture : public Architecture {
+    public:
+        MyArchitecture() : Architecture("my_arch") {
+            // Initialize architecture
+        }
+
+        virtual size_t GetAddressSize() const override {
+            return 4;  // 32-bit
+        }
+
+        virtual bool GetInstructionInfo(
+            const uint8_t* data,
+            uint64_t addr,
+            size_t maxLen,
+            InstructionInfo& result
+        ) override {
+            // Decode and populate instruction info
+            result.length = 4;
+            return true;
+        }
+
+        virtual bool GetInstructionText(
+            const uint8_t* data,
+            uint64_t addr,
+            size_t& len,
+            std::vector<InstructionTextToken>& result
+        ) override {
+            // Disassemble to text tokens
+            len = 4;
+            return true;
+        }
+
+        virtual bool GetInstructionLowLevelIL(
+            const uint8_t* data,
+            uint64_t addr,
+            size_t& len,
+            LowLevelILFunction& il
+        ) override {
+            // Lift to LLIL
+            len = 4;
+            return true;
+        }
+    };
+
+    extern "C" {
+        BN_DECLARE_CORE_ABI_VERSION
+
+        BINARYNINJAPLUGIN bool CorePluginInit() {
+            Architecture::Register(new MyArchitecture());
+            return true;
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Implementing IL lifting
+
+Lifting instructions to LLIL is critical for analysis. Each instruction must be translated to equivalent IL operations:
+
+```python
+def get_instruction_low_level_il(self, data, addr, il):
+    opcode = struct.unpack('>I', data[:4])[0]
+    instr_type = (opcode >> 26) & 0x3F
+
+    if instr_type == 0x00:  # ADD instruction
+        rd = (opcode >> 11) & 0x1F
+        rs = (opcode >> 21) & 0x1F
+        rt = (opcode >> 16) & 0x1F
+
+        il.append(il.set_reg(
+            4,  # Register size
+            rd,  # Destination register
+            il.add(
+                4,  # Operand size
+                il.reg(4, rs),  # Source 1
+                il.reg(4, rt)   # Source 2
+            )
+        ))
+
+    elif instr_type == 0x08:  # Branch if equal
+        rs = (opcode >> 21) & 0x1F
+        rt = (opcode >> 16) & 0x1F
+        offset = (opcode & 0xFFFF) << 2
+        target = addr + 4 + sign_extend(offset, 18)
+
+        # Create conditional branch
+        t = il.get_label_for_address(Architecture['my_arch'], target)
+        if t is None:
+            t = LowLevelILLabel()
+
+        f = il.get_label_for_address(Architecture['my_arch'], addr + 4)
+        if f is None:
+            f = LowLevelILLabel()
+
+        il.append(il.if_expr(
+            il.compare_equal(4, il.reg(4, rs), il.reg(4, rt)),
+            t,
+            f
+        ))
+
+    return 4  # Instruction length
+```
+
+<Warning>
+  Every instruction must be lifted to IL for Binary Ninja's analysis to work correctly.
+</Warning>
+
+## Defining calling conventions
+
+Calling conventions define how functions pass arguments and return values:
+
+```python
+from binaryninja import CallingConvention
+
+class MyCallingConvention(CallingConvention):
+    name = "my_cc"
+    int_arg_regs = ['r0', 'r1', 'r2', 'r3']
+    int_return_reg = 'r0'
+    high_int_return_reg = 'r1'  # For 64-bit returns on 32-bit arch
+    callee_saved_regs = ['r4', 'r5', 'r6', 'r7']
+
+# Register with architecture
+arch = Architecture['my_arch']
+arch.register_calling_convention(MyCallingConvention(arch, 'default'))
+arch.standalone_platform.default_calling_convention = arch.calling_conventions['default']
+```
+
+## Testing your architecture
+
+Test your architecture plugin with sample binaries:
+
+```python
+from binaryninja import BinaryViewType
+
+# Load a test binary
+bv = BinaryViewType['Raw'].open("test_binary.bin")
+bv.arch = Architecture['my_arch']
+bv.platform = Architecture['my_arch'].standalone_platform
+
+# Add entry point
+bv.add_entry_point(0x1000)
+
+# Verify disassembly
+for func in bv.functions:
+    print(f"Function at {hex(func.start)}:")
+    for block in func:
+        for instr in block:
+            print(f"  {hex(instr[0])}: {instr[1]}")
+```
+
+## Example architecture plugins
+
+Binary Ninja's built-in architectures are open source:
+
+- **x86**: [`arch/x86/`](https://github.com/Vector35/binaryninja-api/tree/dev/arch/x86)
+- **ARM64**: [`arch/arm64/`](https://github.com/Vector35/binaryninja-api/tree/dev/arch/arm64)
+- **RISC-V**: [`arch/riscv/`](https://github.com/Vector35/binaryninja-api/tree/dev/arch/riscv)
+- **MSP430**: [`arch/msp430/`](https://github.com/Vector35/binaryninja-api/tree/dev/arch/msp430)
+
+<Note>
+  The NES (6502) architecture in [`python/examples/nes.py`](https://github.com/Vector35/binaryninja-api/blob/dev/python/examples/nes.py) is a complete working example.
+</Note>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Binary view plugins" href="/plugins/binary-view-plugins">
+    Create custom format loaders
+  </Card>
+  <Card title="IL operations guide" href="/guides/il-operations">
+    Learn about LLIL operations
+  </Card>
+</CardGroup>

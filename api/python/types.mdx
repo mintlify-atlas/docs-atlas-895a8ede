@@ -1,0 +1,542 @@
+---
+title: Types API
+description: Define and manipulate type information in Binary Ninja
+---
+
+The Types API provides comprehensive type system support in Binary Ninja, allowing you to define, query, and manipulate type information.
+
+## Overview
+
+Binary Ninja's type system supports:
+
+- **Primitive types** - int, char, float, etc.
+- **Pointers** - Typed pointer types
+- **Arrays** - Fixed and variable-length arrays
+- **Structures** - Complex data structures
+- **Enumerations** - Named integer constants
+- **Functions** - Function signatures
+- **Type references** - Named type references
+
+### Creating Types
+
+```python
+from binaryninja import Type
+
+# Primitive types
+int_type = Type.int(4)  # 32-bit integer
+char_type = Type.char()
+float_type = Type.float(4)
+bool_type = Type.bool()
+
+# Pointers
+int_ptr = Type.pointer(bv.arch, Type.int(4))
+void_ptr = Type.pointer(bv.arch, Type.void())
+
+# Arrays
+char_array = Type.array(Type.char(), 256)
+
+# Structures (inline)
+struct = Type.structure([
+    (Type.int(4), "field1"),
+    (Type.pointer(bv.arch, Type.char()), "field2")
+])
+```
+
+## Type Class
+
+The base Type class (3.0 improvements).
+
+<ParamField path="type_class" type="TypeClass">
+  The class of type (IntegerTypeClass, PointerTypeClass, etc.)
+</ParamField>
+
+<ParamField path="width" type="int">
+  Size of the type in bytes
+</ParamField>
+
+<ParamField path="alignment" type="int">
+  Required alignment in bytes
+</ParamField>
+
+<ParamField path="signed" type="BoolWithConfidence">
+  Whether integer types are signed
+</ParamField>
+
+<ParamField path="const" type="BoolWithConfidence">
+  Whether type is const-qualified
+</ParamField>
+
+<ParamField path="volatile" type="BoolWithConfidence">
+  Whether type is volatile-qualified
+</ParamField>
+
+### Type Creation Methods
+
+<ParamField path="Type.void" type="() -> Type">
+  Create a void type
+  
+  ```python
+  void_type = Type.void()
+  ```
+</ParamField>
+
+<ParamField path="Type.bool" type="() -> Type">
+  Create a boolean type
+  
+  ```python
+  bool_type = Type.bool()
+  ```
+</ParamField>
+
+<ParamField path="Type.int" type="(width: int, sign: BoolWithConfidence = True) -> Type">
+  Create an integer type
+  
+  <Expandable title="Parameters">
+    <ResponseField name="width" type="int" required>
+      Size in bytes (1, 2, 4, or 8)
+    </ResponseField>
+    <ResponseField name="sign" type="bool">
+      Whether signed (default: True)
+    </ResponseField>
+  </Expandable>
+  
+  ```python
+  int32 = Type.int(4)           # signed int32
+  uint64 = Type.int(8, False)   # unsigned int64
+  ```
+</ParamField>
+
+<ParamField path="Type.float" type="(width: int) -> Type">
+  Create a floating-point type
+  
+  ```python
+  float_type = Type.float(4)   # 32-bit float
+  double_type = Type.float(8)  # 64-bit double
+  ```
+</ParamField>
+
+<ParamField path="Type.char" type="() -> Type">
+  Create a char type
+  
+  ```python
+  char_type = Type.char()
+  ```
+</ParamField>
+
+<ParamField path="Type.pointer" type="(arch: Architecture, target: Type, ...) -> Type">
+  Create a pointer type
+  
+  <Expandable title="Parameters">
+    <ResponseField name="arch" type="Architecture" required>
+      Architecture (determines pointer size)
+    </ResponseField>
+    <ResponseField name="target" type="Type" required>
+      Type being pointed to
+    </ResponseField>
+    <ResponseField name="const" type="bool">
+      Whether pointer is const
+    </ResponseField>
+    <ResponseField name="volatile" type="bool">
+      Whether pointer is volatile
+    </ResponseField>
+  </Expandable>
+  
+  ```python
+  int_ptr = Type.pointer(bv.arch, Type.int(4))
+  const_ptr = Type.pointer(bv.arch, Type.char(), const=True)
+  ```
+</ParamField>
+
+<ParamField path="Type.array" type="(element_type: Type, count: int) -> Type">
+  Create an array type
+  
+  ```python
+  buffer = Type.array(Type.char(), 256)
+  int_array = Type.array(Type.int(4), 10)
+  ```
+</ParamField>
+
+## Structure Types
+
+In Binary Ninja 3.0, `Structure` inherits from `Type`.
+
+### Creating Structures
+
+```python
+# Quick inline structure
+struct = Type.structure([
+    (Type.int(4), "x"),
+    (Type.int(4), "y"),
+    (Type.pointer(bv.arch, Type.char()), "name")
+])
+
+# Named structure
+struct_builder = StructureBuilder.create()
+struct_builder.append(Type.int(4), "field1")
+struct_builder.append(Type.int(4), "field2")
+struct_type = Type.structure_type(struct_builder)
+
+bv.define_user_type("MyStruct", struct_type)
+```
+
+### Structure Properties (3.0)
+
+<Note>
+In 3.0, access structure members directly on the Type object
+</Note>
+
+```python
+# Before (2.x)
+members = bv.types['MyStruct'].structure.members
+
+# After (3.0)
+members = bv.types['MyStruct'].members
+
+for member in members:
+    print(f"{member.name}: {member.type} @ offset {member.offset}")
+```
+
+<ParamField path="members" type="list[StructureMember]">
+  Structure members (3.0+)
+</ParamField>
+
+<ParamField path="width" type="int">
+  Total size of the structure
+</ParamField>
+
+<ParamField path="alignment" type="int">
+  Structure alignment
+</ParamField>
+
+### StructureMember
+
+<ParamField path="type" type="Type">
+  Member type
+</ParamField>
+
+<ParamField path="name" type="str">
+  Member name
+</ParamField>
+
+<ParamField path="offset" type="int">
+  Offset within structure
+</ParamField>
+
+<ParamField path="access" type="MemberAccess">
+  Access level (public, private, protected)
+</ParamField>
+
+### Working with Structures
+
+```python
+# Get structure type
+struct_type = bv.types['MyStruct']
+
+# Access members
+for member in struct_type.members:
+    print(f"{member.name}: {member.type} @ +{member.offset:#x}")
+
+# Get member by name
+member = struct_type.member_by_name("field1")
+
+# Get member at offset
+member = struct_type.member_at_offset(4)
+
+# Add structure member
+struct_builder = StructureBuilder.create(struct_type)
+struct_builder.insert(8, Type.int(4), "new_field")
+bv.define_user_type("MyStruct", struct_builder.immutable_copy())
+```
+
+## Enumeration Types
+
+Enumerations inherit from Type in 3.0.
+
+```python
+# Create enumeration
+enum_builder = EnumerationBuilder.create()
+enum_builder.append("VALUE_A", 0)
+enum_builder.append("VALUE_B", 1)
+enum_builder.append("VALUE_C", 5)
+
+enum_type = Type.enumeration_type(
+    bv.arch,
+    enum_builder,
+    width=4
+)
+
+bv.define_user_type("MyEnum", enum_type)
+
+# Access enumeration (3.0)
+enum_type = bv.types['MyEnum']
+for member in enum_type.members:
+    print(f"{member.name} = {member.value}")
+```
+
+<ParamField path="members" type="list[EnumerationMember]">
+  Enumeration members
+</ParamField>
+
+### EnumerationMember
+
+<ParamField path="name" type="str">
+  Member name
+</ParamField>
+
+<ParamField path="value" type="int">
+  Member value
+</ParamField>
+
+## Function Types
+
+Define function signatures:
+
+```python
+# Create function type
+func_type = Type.function(
+    return_type=Type.int(4),
+    parameters=[
+        (Type.pointer(bv.arch, Type.char()), "str"),
+        (Type.int(4), "count")
+    ],
+    calling_convention=bv.platform.default_calling_convention
+)
+
+# Apply to function
+func = bv.get_function_at(0x401000)
+func.type = func_type
+
+# Access function type properties
+print(f"Return type: {func_type.return_value}")
+for param in func_type.parameters:
+    print(f"Parameter: {param.name}: {param.type}")
+```
+
+<ParamField path="return_value" type="Type">
+  Function return type
+</ParamField>
+
+<ParamField path="parameters" type="list[FunctionParameter]">
+  Function parameters
+</ParamField>
+
+<ParamField path="calling_convention" type="CallingConvention">
+  Calling convention used
+</ParamField>
+
+<ParamField path="has_variable_arguments" type="BoolWithConfidence">
+  Whether function accepts varargs
+</ParamField>
+
+### FunctionParameter
+
+```python
+param = FunctionParameter(
+    type=Type.int(4),
+    name="count",
+    location=None  # Optional variable location
+)
+```
+
+<ParamField path="type" type="Type">
+  Parameter type
+</ParamField>
+
+<ParamField path="name" type="str">
+  Parameter name
+</ParamField>
+
+<ParamField path="location" type="Optional[VariableNameAndType]">
+  Storage location (register, stack offset)
+</ParamField>
+
+## Named Type References
+
+Reference types by name:
+
+```python
+# Create named type reference
+type_ref = Type.named_type_from_type(
+    "MyStruct",
+    bv.types['MyStruct']
+)
+
+# Or create reference directly
+type_ref = Type.named_type(NamedTypeReferenceClass.StructNamedTypeClass, "MyStruct")
+
+# Use in other types
+struct_ptr = Type.pointer(bv.arch, type_ref)
+```
+
+## Type Parsing
+
+Parse C type declarations:
+
+```python
+# Parse type string
+result = bv.parse_type_string("struct MyStruct { int x; char* name; }")
+if result:
+    type_obj, name = result
+    bv.define_user_type(name, type_obj)
+
+# Parse function signature
+result = bv.parse_type_string("int add(int a, int b)")
+if result:
+    func_type, func_name = result
+    func = bv.get_function_at(0x401000)
+    func.type = func_type
+
+# Parse with headers
+header = """
+typedef struct {
+    int x;
+    int y;
+} Point;
+"""
+result = bv.parse_types_from_string(header)
+for name, type_obj in result.types.items():
+    bv.define_user_type(name, type_obj)
+```
+
+## QualifiedName
+
+Namespaced type names:
+
+```python
+from binaryninja.types import QualifiedName
+
+# Create qualified name
+name = QualifiedName(["std", "vector", "iterator"])
+print(str(name))  # "std::vector::iterator"
+
+# Use with types
+bv.define_user_type(name, struct_type)
+
+# Get type by qualified name
+type_obj = bv.types[name]
+```
+
+## Type Containers
+
+Manage collections of types:
+
+```python
+# BinaryView is a type container
+for name, type_obj in bv.types.items():
+    print(f"{name}: {type_obj}")
+
+# Define types
+bv.define_user_type("MyStruct", struct_type)
+
+# Get type
+my_type = bv.types['MyStruct']
+
+# Remove type
+bv.undefine_user_type('MyStruct')
+```
+
+## Type Libraries
+
+Import platform types:
+
+```python
+# Load type library
+type_lib = bv.platform.get_type_libraries_by_name("libc")[0]
+
+# Import specific type
+if 'FILE' in type_lib.named_types:
+    file_type = type_lib.named_types['FILE']
+    bv.import_library_type('FILE')
+
+# Import all types from library
+for name in type_lib.named_types:
+    bv.import_library_type(name)
+```
+
+## Type Formatting
+
+```python
+# Get string representation
+type_str = str(type_obj)
+
+# Get tokens for UI display
+tokens = type_obj.get_tokens()
+for token in tokens:
+    print(token.text, end="")
+
+# Get type before name
+before = type_obj.get_string_before_name()
+after = type_obj.get_string_after_name()
+print(f"{before} my_var{after};")  # "int* my_var;"
+```
+
+## Example: Auto-Type Structures
+
+```python
+def create_struct_from_accesses(func, base_reg):
+    """Infer structure from memory accesses."""
+    from binaryninja import StructureBuilder
+    
+    # Track offsets accessed
+    accesses = {}  # offset -> size
+    
+    for block in func.llil:
+        for instr in block:
+            # Look for memory accesses with base register
+            if hasattr(instr, 'src') and hasattr(instr.src, 'operands'):
+                # Simplified - real implementation more complex
+                pass
+    
+    # Build structure
+    struct_builder = StructureBuilder.create()
+    for offset in sorted(accesses.keys()):
+        size = accesses[offset]
+        field_type = Type.int(size)
+        struct_builder.insert(offset, field_type, f"field_{offset:x}")
+    
+    return struct_builder.immutable_copy()
+```
+
+## Example: Apply Types from JSON
+
+```python
+import json
+
+def apply_types_from_json(bv, json_path):
+    """Apply type information from JSON file."""
+    with open(json_path) as f:
+        type_info = json.load(f)
+    
+    # Define structures
+    for name, members in type_info.get('structures', {}).items():
+        struct_builder = StructureBuilder.create()
+        
+        for member in members:
+            # Parse member type
+            result = bv.parse_type_string(member['type'])
+            if result:
+                member_type, _ = result
+                struct_builder.append(
+                    member_type,
+                    member['name']
+                )
+        
+        bv.define_user_type(name, struct_builder.immutable_copy())
+    
+    # Apply function types
+    for addr_str, sig in type_info.get('functions', {}).items():
+        addr = int(addr_str, 16)
+        result = bv.parse_type_string(sig)
+        
+        if result:
+            func_type, _ = result
+            func = bv.get_function_at(addr)
+            if func:
+                func.type = func_type
+```
+
+## See Also
+
+- [BinaryView API](/api/python/binaryview) - Binary file access
+- [Function API](/api/python/function) - Function analysis
+- [Platform API](/api/python/platform) - Platform-specific types

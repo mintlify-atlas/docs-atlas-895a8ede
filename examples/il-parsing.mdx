@@ -1,0 +1,377 @@
+---
+title: IL Parsing and Traversal
+description: Learn how to parse and traverse Binary Ninja's Intermediate Language (IL) representations
+---
+
+This example demonstrates comprehensive IL parsing techniques for both Low Level IL (LLIL) and Medium Level IL (MLIL), including expression tree traversal and visitor patterns.
+
+## Overview
+
+Binary Ninja provides multiple IL representations for analysis. These examples show how to:
+- Parse LLIL and MLIL instruction trees
+- Use visitor patterns for expression traversal
+- Extract operands and constants from IL
+- Use templated accessors for type-safe IL access
+
+## Low Level IL Parser (C++)
+
+This example parses LLIL instructions and demonstrates generic tree traversal.
+
+### Complete Source Code
+
+```cpp
+#include <cstdio>
+#include <cinttypes>
+#include "binaryninjacore.h"
+#include "binaryninjaapi.h"
+#include "lowlevelilinstruction.h"
+
+using namespace BinaryNinja;
+using namespace std;
+
+static void PrintIndent(size_t indent)
+{
+    for (size_t i = 0; i < indent; i++)
+        printf("    ");
+}
+
+static void PrintOperation(BNLowLevelILOperation operation)
+{
+    #define ENUM_PRINTER(op) \
+        case op: \
+            printf(#op); \
+            break;
+
+    switch (operation)
+    {
+        ENUM_PRINTER(LLIL_NOP)
+        ENUM_PRINTER(LLIL_SET_REG)
+        ENUM_PRINTER(LLIL_LOAD)
+        ENUM_PRINTER(LLIL_STORE)
+        ENUM_PRINTER(LLIL_ADD)
+        ENUM_PRINTER(LLIL_CALL)
+        // ... (see full example for complete list)
+    default:
+        printf("<invalid operation %" PRId32 ">", operation);
+        break;
+    }
+}
+
+static void PrintILExpr(const LowLevelILInstruction& instr, size_t indent)
+{
+    PrintIndent(indent);
+    PrintOperation(instr.operation);
+    printf("\n");
+
+    indent++;
+
+    for (auto& operand : instr.GetOperands())
+    {
+        switch (operand.GetType())
+        {
+        case IntegerLowLevelOperand:
+            PrintIndent(indent);
+            printf("int 0x%" PRIx64 "\n", operand.GetInteger());
+            break;
+
+        case ExprLowLevelOperand:
+            PrintILExpr(operand.GetExpr(), indent);
+            break;
+
+        case RegisterLowLevelOperand:
+            PrintIndent(indent);
+            printf("reg %s\n", 
+                instr.function->GetArchitecture()->GetRegisterName(operand.GetRegister()).c_str());
+            break;
+
+        // ... (additional operand types)
+        }
+    }
+}
+
+int main(int argc, char* argv[])
+{
+    if (argc != 2)
+    {
+        fprintf(stderr, "Expected input filename\n");
+        return 1;
+    }
+
+    SetBundledPluginDirectory(GetBundledPluginDirectory());
+    InitPlugins();
+
+    Ref<BinaryView> bv = BinaryNinja::Load(argv[1]);
+    if (!bv || bv->GetTypeName() == "Raw")
+    {
+        fprintf(stderr, "Input file does not appear to be an executable\n");
+        return -1;
+    }
+
+    // Go through all functions in the binary
+    for (auto& func : bv->GetAnalysisFunctionList())
+    {
+        Ref<Symbol> sym = func->GetSymbol();
+        if (sym)
+            printf("Function %s:\n", sym->GetFullName().c_str());
+        else
+            printf("Function at 0x%" PRIx64 ":\n", func->GetStart());
+
+        // Fetch the low level IL for the function
+        Ref<LowLevelILFunction> il = func->GetLowLevelIL();
+        if (!il)
+        {
+            printf("    Does not have LLIL\n\n");
+            continue;
+        }
+
+        // Loop through all blocks in the function
+        for (auto& block : il->GetBasicBlocks())
+        {
+            // Loop though each instruction in the block
+            for (size_t instrIndex = block->GetStart(); instrIndex < block->GetEnd(); instrIndex++)
+            {
+                LowLevelILInstruction instr = (*il)[instrIndex];
+
+                // Display core's interpretation of the IL instruction
+                vector<InstructionTextToken> tokens;
+                il->GetInstructionText(func, func->GetArchitecture(), instrIndex, tokens);
+                printf("    %" PRIdPTR " @ 0x%" PRIx64 "  ", instrIndex, instr.address);
+                for (auto& token : tokens)
+                    printf("%s", token.text.c_str());
+                printf("\n");
+
+                // Generically parse the IL tree and display the parts
+                PrintILExpr(instr, 2);
+
+                // Example of using visitors to find all constants
+                instr.VisitExprs([&](const LowLevelILInstruction& expr) {
+                    switch (expr.operation)
+                    {
+                    case LLIL_CONST:
+                    case LLIL_CONST_PTR:
+                    case LLIL_EXTERN_PTR:
+                        printf("        Found constant 0x%" PRIx64 "\n", expr.GetConstant());
+                        return false;  // Done parsing this
+                    default:
+                        break;
+                    }
+                    return true;  // Parse any subexpressions
+                });
+
+                // Example using templated accessors for type-safe access
+                instr.VisitExprs([&](const LowLevelILInstruction& expr) {
+                    switch (expr.operation)
+                    {
+                    case LLIL_LOAD:
+                        if (expr.GetSourceExpr<LLIL_LOAD>().operation == LLIL_CONST_PTR)
+                        {
+                            printf("        Loading from address 0x%" PRIx64 "\n",
+                                expr.GetSourceExpr<LLIL_LOAD>().GetConstant<LLIL_CONST_PTR>());
+                            return false;
+                        }
+                        break;
+                    default:
+                        break;
+                    }
+                    return true;
+                });
+            }
+        }
+
+        printf("\n");
+    }
+
+    bv->GetFile()->Close();
+    BNShutdown();
+    return 0;
+}
+```
+
+## Medium Level IL Parser (C++)
+
+MLIL provides a higher-level representation with variables and types.
+
+### Key Differences from LLIL
+
+```cpp
+// MLIL uses variables instead of registers
+static void PrintVariable(MediumLevelILFunction* func, const Variable& var)
+{
+    string name = func->GetFunction()->GetVariableName(var);
+    if (name.size() == 0)
+        printf("<no name>");
+    else
+        printf("%s", name.c_str());
+}
+
+// Parse MLIL expressions
+for (auto& operand : instr.GetOperands())
+{
+    switch (operand.GetType())
+    {
+    case VariableMediumLevelOperand:
+        PrintIndent(indent);
+        printf("var ");
+        PrintVariable(instr.function, operand.GetVariable());
+        printf("\n");
+        break;
+
+    case SSAVariableMediumLevelOperand:
+        PrintIndent(indent);
+        printf("ssa var ");
+        PrintVariable(instr.function, operand.GetSSAVariable().var);
+        printf("#%" PRIdPTR "\n", operand.GetSSAVariable().version);
+        break;
+    // ...
+    }
+}
+```
+
+## Key Concepts Explained
+
+<Steps>
+
+### Initialize Binary Ninja Core
+
+```cpp
+SetBundledPluginDirectory(GetBundledPluginDirectory());
+InitPlugins();
+```
+
+For C++ headless applications, you must initialize the plugin system before using Binary Ninja APIs.
+
+### Access IL Functions
+
+```cpp
+Ref<LowLevelILFunction> il = func->GetLowLevelIL();
+Ref<MediumLevelILFunction> mlil = func->GetMediumLevelIL();
+```
+
+Each function has multiple IL representations:
+- **LLIL** - Low-level, close to assembly but normalized
+- **MLIL** - Medium-level with variables and structured operations
+- **HLIL** - High-level C-like decompilation
+
+### Traverse IL Expression Trees
+
+```cpp
+for (auto& operand : instr.GetOperands())
+{
+    switch (operand.GetType())
+    {
+    case ExprLowLevelOperand:
+        PrintILExpr(operand.GetExpr(), indent);
+        break;
+    // ...
+    }
+}
+```
+
+IL instructions form expression trees. Recursively traverse using `GetOperands()` to access child expressions.
+
+### Use Visitor Pattern
+
+```cpp
+instr.VisitExprs([&](const LowLevelILInstruction& expr) {
+    if (expr.operation == LLIL_CONST)
+    {
+        printf("Found constant 0x%" PRIx64 "\n", expr.GetConstant());
+        return false;  // Stop traversing this branch
+    }
+    return true;  // Continue to subexpressions
+});
+```
+
+Visitors provide a clean way to search IL trees:
+- Return `true` to continue traversing subexpressions
+- Return `false` to stop traversing current branch
+- Lambda captures allow accumulating results
+
+### Type-Safe Templated Accessors
+
+```cpp
+if (expr.operation == LLIL_LOAD)
+{
+    auto sourceExpr = expr.GetSourceExpr<LLIL_LOAD>();
+    if (sourceExpr.operation == LLIL_CONST_PTR)
+    {
+        uint64_t addr = sourceExpr.GetConstant<LLIL_CONST_PTR>();
+    }
+}
+```
+
+Templated accessors provide compile-time type safety for accessing specific operands based on operation type.
+
+### Clean Shutdown
+
+```cpp
+bv->GetFile()->Close();
+BNShutdown();
+```
+
+Always close files and shutdown Binary Ninja for clean exit in headless mode.
+
+</Steps>
+
+## Building and Running
+
+### LLIL Parser
+
+```bash
+cd ~/workspace/source/examples/llil_parser
+mkdir build && cd build
+cmake ..
+make
+./llil_parser /path/to/binary
+```
+
+### MLIL Parser
+
+```bash
+cd ~/workspace/source/examples/mlil_parser
+mkdir build && cd build
+cmake ..
+make
+./mlil_parser /path/to/binary
+```
+
+## Expected Output
+
+```
+Function main:
+    0 @ 0x100001a40  temp0 = sp
+        LLIL_SET_REG
+            reg temp0
+            LLIL_REG
+                reg sp
+    
+    1 @ 0x100001a40  sp = temp0 - 0x10
+        LLIL_SET_REG
+            reg sp
+            LLIL_SUB
+                LLIL_REG
+                    reg temp0
+                LLIL_CONST
+                    int 0x10
+        Found constant 0x10
+    
+    5 @ 0x100001a50  call(0x100001b00)
+        LLIL_CALL
+            LLIL_CONST_PTR
+                int 0x100001b00
+        Found constant 0x100001b00
+```
+
+## Use Cases
+
+- **Custom Analysis** - Build analysis passes over IL
+- **Pattern Matching** - Find specific code patterns
+- **Optimization Detection** - Identify compiler optimizations
+- **Vulnerability Research** - Search for dangerous patterns
+- **IL Understanding** - Learn Binary Ninja's IL design
+
+## Related Examples
+
+- [Custom IL Visitor](/examples/custom-il-visitor) - Advanced visitor implementations
+- [Function Iteration](/examples/function-iteration) - Basic IL access patterns
+- [Workflow Extension](/examples/workflow-extension) - IL-based analysis workflows

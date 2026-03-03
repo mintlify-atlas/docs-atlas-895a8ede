@@ -1,0 +1,481 @@
+---
+title: Intermediate Languages
+description: Understanding Binary Ninja's multi-level IL representation system
+---
+
+## Overview
+
+Binary Ninja uses a **multi-level intermediate language (IL)** system to represent and analyze code at different levels of abstraction. This allows you to analyze binaries at the level that best suits your needs - from low-level machine operations to high-level decompiled code.
+
+<Info>
+The IL system is one of Binary Ninja's most powerful features, enabling sophisticated analysis, optimization, and decompilation.
+</Info>
+
+## IL Hierarchy
+
+Binary Ninja has four main IL levels, each building on the previous:
+
+```
+Disassembly (Machine Code)
+    ↓
+Low Level IL (LLIL)
+    ↓
+Medium Level IL (MLIL)  
+    ↓
+High Level IL (HLIL)
+    ↓
+Pseudo C (Decompilation)
+```
+
+### 1. Low Level IL (LLIL)
+
+**Lifted IL** - Direct translation of machine instructions into IL operations.
+
+- One-to-one mapping with assembly instructions
+- Architecture-independent representation
+- Preserves all architecture-specific details
+- Used for architecture-agnostic analysis
+
+```python
+# Example LLIL operations
+rax = 0x1234          # LLIL_SET_REG
+mem[rsp] = rax        # LLIL_STORE
+if (eax == 0) goto 5  # LLIL_IF, LLIL_CMP_E
+```
+
+### 2. Medium Level IL (MLIL)
+
+**Delifted IL** - Removes architecture-specific details and simplifies operations.
+
+- Converts to SSA (Static Single Assignment) form
+- Recovers variables and expressions
+- Removes stack pointer tracking
+- Simplifies complex addressing modes
+
+```python
+# Example MLIL operations
+var_10 = 0x1234       # MLIL_SET_VAR
+if (eax_1 == 0)       # MLIL_IF, MLIL_CMP_E
+    return eax_1       # MLIL_RET
+```
+
+### 3. High Level IL (HLIL)
+
+**High-level representation** - Structured, decompiled code representation.
+
+- Control flow structures (if/else, while, for, switch)
+- Type propagation and inference
+- Variable recovery
+- Close to C-like source code
+
+```python
+# Example HLIL operations  
+if (x == 0) {         # HLIL_IF
+    return x;         # HLIL_RET
+}
+while (i < 10) {      # HLIL_WHILE
+    i = i + 1;        # HLIL_ASSIGN
+}
+```
+
+## Accessing IL
+
+### Getting IL from Functions
+
+```python
+import binaryninja
+from binaryninja import load
+
+bv = load("/path/to/binary")
+func = bv.get_function_at(address)
+
+# Get Low Level IL
+llil = func.low_level_il
+print(llil)  # <llil: func @ 0x...>
+
+# Get Medium Level IL
+mlil = func.medium_level_il
+print(mlil)  # <mlil: func @ 0x...>
+
+# Get High Level IL
+hlil = func.high_level_il
+print(hlil)  # <hlil: func @ 0x...>
+
+# Get SSA forms
+llil_ssa = func.low_level_il.ssa_form
+mlil_ssa = func.medium_level_il.ssa_form
+hlil_ssa = func.high_level_il.ssa_form
+```
+
+### Iterating IL Instructions
+
+```python
+# Iterate LLIL instructions
+for block in func.low_level_il:
+    for instr in block:
+        print(f"0x{instr.address:x}: {instr}")
+
+# Iterate MLIL instructions
+for block in func.medium_level_il:
+    for instr in block:
+        print(f"0x{instr.address:x}: {instr}")
+
+# Iterate HLIL instructions
+for block in func.high_level_il:
+    for instr in block:
+        print(f"Line {instr.instr_index}: {instr}")
+```
+
+## Low Level IL (LLIL)
+
+### LLIL Operations
+
+Common LLIL operations include:
+
+```python
+from binaryninja.enums import LowLevelILOperation
+
+# Assignment operations
+LLIL_SET_REG        # Register assignment
+LLIL_SET_FLAG       # Flag assignment
+LLIL_STORE          # Memory write
+LLIL_LOAD           # Memory read
+
+# Arithmetic operations
+LLIL_ADD, LLIL_SUB, LLIL_MUL, LLIL_DIV
+LLIL_AND, LLIL_OR, LLIL_XOR, LLIL_NOT
+LLIL_LSL, LLIL_LSR, LLIL_ASR, LLIL_ROL, LLIL_ROR
+
+# Control flow
+LLIL_JUMP           # Unconditional jump
+LLIL_JUMP_TO        # Indirect jump
+LLIL_CALL           # Function call
+LLIL_RET            # Return
+LLIL_IF             # Conditional branch
+LLIL_GOTO           # Internal goto
+
+# System operations
+LLIL_SYSCALL        # System call
+LLIL_TRAP           # Trap/interrupt
+LLIL_INTRINSIC      # Architecture intrinsic
+```
+
+### Working with LLIL
+
+```python
+from binaryninja.enums import LowLevelILOperation
+
+# Find all syscalls
+for instr in func.low_level_il.instructions:
+    if instr.operation == LowLevelILOperation.LLIL_SYSCALL:
+        # Get syscall number
+        syscall_num = func.get_reg_value_at(
+            instr.address, 
+            arch.calling_conventions['syscall'].int_arg_regs[0]
+        )
+        print(f"Syscall at 0x{instr.address:x}: {syscall_num.value}")
+
+# Find all calls
+for instr in func.low_level_il.instructions:
+    if instr.operation == LowLevelILOperation.LLIL_CALL:
+        target = instr.dest
+        print(f"Call to {target}")
+```
+
+### LLIL Registers and Flags
+
+```python
+# Access register operands
+for instr in llil:
+    if instr.operation == LowLevelILOperation.LLIL_SET_REG:
+        reg = instr.dest  # ILRegister object
+        value = instr.src
+        print(f"{reg.name} = {value}")
+
+# Access flags
+for instr in llil:
+    if hasattr(instr, 'flags_written'):
+        print(f"Writes flags: {instr.flags_written}")
+```
+
+## Medium Level IL (MLIL)
+
+### MLIL Operations
+
+Common MLIL operations include:
+
+```python
+from binaryninja.enums import MediumLevelILOperation
+
+# Variable operations
+MLIL_SET_VAR        # Variable assignment
+MLIL_VAR            # Variable read
+MLIL_ADDRESS_OF     # Take address of variable
+
+# Memory operations
+MLIL_LOAD           # Load from memory
+MLIL_STORE          # Store to memory
+MLIL_LOAD_STRUCT    # Load struct member
+MLIL_STORE_STRUCT   # Store struct member
+
+# Arithmetic
+MLIL_ADD, MLIL_SUB, MLIL_MUL, MLIL_DIVU, MLIL_DIVS
+MLIL_MODU, MLIL_MODS
+MLIL_AND, MLIL_OR, MLIL_XOR, MLIL_NOT
+
+# Comparisons
+MLIL_CMP_E          # Equal
+MLIL_CMP_NE         # Not equal  
+MLIL_CMP_SLT        # Signed less than
+MLIL_CMP_ULT        # Unsigned less than
+MLIL_CMP_SLE, MLIL_CMP_ULE, MLIL_CMP_SGE, MLIL_CMP_UGE
+MLIL_CMP_SGT, MLIL_CMP_UGT
+
+# Control flow
+MLIL_IF             # Conditional
+MLIL_GOTO           # Goto
+MLIL_CALL           # Function call
+MLIL_RET            # Return
+MLIL_JUMP           # Jump
+```
+
+### Working with MLIL Variables
+
+```python
+from binaryninja.enums import MediumLevelILOperation
+
+# Analyze variable uses
+for instr in func.medium_level_il.instructions:
+    if instr.operation == MediumLevelILOperation.MLIL_SET_VAR:
+        var = instr.dest  # Variable object
+        value = instr.src
+        print(f"{var.name} = {value}")
+        print(f"  Type: {var.type}")
+        print(f"  Source: {var.source_type}")
+```
+
+### SSA Form
+
+```python
+# Get SSA variables
+mlil_ssa = func.medium_level_il.ssa_form
+
+for instr in mlil_ssa.instructions:
+    if instr.operation == MediumLevelILOperation.MLIL_SET_VAR_SSA:
+        ssa_var = instr.dest  # SSAVariable
+        print(f"{ssa_var.var.name}#{ssa_var.version} = {instr.src}")
+
+# Get definition and uses
+for var in func.medium_level_il.ssa_form.ssa_vars:
+    # Get where variable is defined
+    def_site = mlil_ssa.get_ssa_var_definition(var)
+    print(f"{var} defined at: {def_site}")
+    
+    # Get all uses
+    uses = mlil_ssa.get_ssa_var_uses(var)
+    print(f"  Used {len(uses)} times")
+```
+
+## High Level IL (HLIL)
+
+### HLIL Operations
+
+```python
+from binaryninja.enums import HighLevelILOperation
+
+# Variable operations
+HLIL_ASSIGN         # Assignment
+HLIL_VAR            # Variable reference
+HLIL_STRUCT_FIELD   # Structure field access
+HLIL_ARRAY_INDEX    # Array indexing
+
+# Control flow structures
+HLIL_IF             # If statement
+HLIL_WHILE          # While loop
+HLIL_DO_WHILE       # Do-while loop  
+HLIL_FOR            # For loop
+HLIL_SWITCH         # Switch statement
+HLIL_BREAK          # Break
+HLIL_CONTINUE       # Continue
+HLIL_GOTO           # Goto
+
+# Function operations
+HLIL_CALL           # Function call
+HLIL_RET            # Return
+
+# Expressions
+HLIL_CONST          # Constant
+HLIL_ADD, HLIL_SUB, HLIL_MUL, HLIL_DIVU, HLIL_DIVS
+HLIL_CMP_E, HLIL_CMP_NE, HLIL_CMP_SLT, etc.
+```
+
+### Analyzing HLIL
+
+```python
+from binaryninja.enums import HighLevelILOperation
+
+# Find all function calls
+for instr in func.high_level_il.instructions:
+    if instr.operation == HighLevelILOperation.HLIL_CALL:
+        target = instr.dest
+        params = instr.params
+        print(f"Call to {target}")
+        print(f"  Parameters: {len(params)}")
+        for i, param in enumerate(params):
+            print(f"    Arg {i}: {param}")
+
+# Find loops
+for instr in func.high_level_il.instructions:
+    if instr.operation == HighLevelILOperation.HLIL_WHILE:
+        condition = instr.condition
+        body = instr.body
+        print(f"While loop: {condition}")
+```
+
+## IL Cross-References
+
+### Mapping Between IL Levels
+
+```python
+# Get MLIL from LLIL
+for llil_instr in func.low_level_il:
+    mlil_instr = llil_instr.mlil
+    if mlil_instr:
+        print(f"LLIL: {llil_instr} -> MLIL: {mlil_instr}")
+
+# Get HLIL from MLIL
+for mlil_instr in func.medium_level_il:
+    hlil_instr = mlil_instr.hlil
+    if hlil_instr:
+        print(f"MLIL: {mlil_instr} -> HLIL: {hlil_instr}")
+
+# Get LLIL from address
+llil_instrs = func.get_low_level_ils_at(address, arch)
+for llil in llil_instrs:
+    print(f"LLIL at 0x{address:x}: {llil}")
+```
+
+### Getting IL at Specific Address
+
+```python
+# Get LLIL at address
+llil = func.get_low_level_il_at(address)
+if llil:
+    print(f"LLIL: {llil}")
+    
+    # Get corresponding MLIL
+    mlil = llil.mlil
+    if mlil:
+        print(f"MLIL: {mlil}")
+        
+        # Get corresponding HLIL
+        hlil = mlil.hlil  
+        if hlil:
+            print(f"HLIL: {hlil}")
+```
+
+## Practical Examples
+
+### Example 1: Finding Syscalls
+
+```python
+from binaryninja import load
+from binaryninja.enums import LowLevelILOperation
+from itertools import chain
+
+def print_syscalls(filename):
+    bv = load(filename)
+    cc = bv.platform.system_call_convention
+    
+    if not cc:
+        print(f"No syscall convention for {bv.platform}")
+        return
+    
+    syscall_reg = cc.int_arg_regs[0]
+    
+    for func in bv.functions:
+        # Find all LLIL_SYSCALL instructions
+        syscalls = (
+            il for il in chain.from_iterable(func.low_level_il) 
+            if il.operation == LowLevelILOperation.LLIL_SYSCALL
+        )
+        
+        for il in syscalls:
+            # Get syscall number from register
+            value = func.get_reg_value_at(il.address, syscall_reg)
+            print(f"0x{il.address:x}: syscall {value.value}")
+
+print_syscalls("/bin/ls")
+```
+
+### Example 2: Analyzing Variables
+
+```python
+from binaryninja.enums import MediumLevelILOperation
+
+def analyze_variables(func):
+    mlil = func.medium_level_il
+    
+    # Count variable assignments
+    assignments = {}
+    for instr in mlil.instructions:
+        if instr.operation == MediumLevelILOperation.MLIL_SET_VAR:
+            var = instr.dest
+            assignments[var.name] = assignments.get(var.name, 0) + 1
+    
+    print(f"\nVariables in {func.name}:")
+    for var_name, count in assignments.items():
+        print(f"  {var_name}: assigned {count} times")
+
+bv = load("/path/to/binary")
+for func in bv.functions[:5]:
+    analyze_variables(func)
+```
+
+### Example 3: IL Instruction Visitor
+
+```python
+def visit_hlil(instr, depth=0):
+    """Recursively visit HLIL instruction tree"""
+    indent = "  " * depth
+    print(f"{indent}{instr.operation.name}")
+    
+    # Visit operands
+    for operand_name, operand_type in instr.ILOperations[instr.operation]:
+        operand = getattr(instr, operand_name, None)
+        if operand:
+            if isinstance(operand, list):
+                for item in operand:
+                    if hasattr(item, 'operation'):
+                        visit_hlil(item, depth + 1)
+            elif hasattr(operand, 'operation'):
+                visit_hlil(operand, depth + 1)
+
+# Visit all HLIL instructions in function
+for instr in func.high_level_il.instructions:
+    visit_hlil(instr)
+    print()
+```
+
+## IL Instruction Attributes
+
+```python
+from binaryninja.enums import ILInstructionAttribute
+
+# Check instruction attributes
+for instr in llil.instructions:
+    attrs = instr.attributes
+    
+    if ILInstructionAttribute.ILInstructionAttributeIsDest in attrs:
+        print(f"{instr} writes to destination")
+    
+    if ILInstructionAttribute.ILInstructionAttributeIsCall in attrs:
+        print(f"{instr} is a call")
+```
+
+## Related Concepts
+
+- [Functions](./functions) - Function representation and analysis
+- [Architectures](./architectures) - Architecture-specific details
+- [Types](./types) - Type information and propagation
+- [Binary Views](./binary-views) - Binary file representation

@@ -1,0 +1,521 @@
+---
+title: Intermediate Language (IL) Classes
+description: C++ API reference for Binary Ninja's IL system - LLIL, MLIL, and HLIL
+---
+
+Binary Ninja provides three levels of Intermediate Language (IL) representations for analyzing binary code. Each level provides progressively higher-level abstractions:
+
+- **LLIL (Low-Level IL)** - Close to assembly, with register-level operations
+- **MLIL (Medium-Level IL)** - SSA form with variables instead of registers
+- **HLIL (High-Level IL)** - High-level language constructs (if/while/for)
+
+## Low-Level IL (LLIL)
+
+### LowLevelILFunction Class
+
+Defined in `binaryninjaapi.h:13914`
+
+```cpp
+namespace BinaryNinja {
+    class LowLevelILFunction : 
+        public CoreRefCountObject<BNLowLevelILFunction,
+                                   BNNewLowLevelILFunctionReference,
+                                   BNFreeLowLevelILFunction>
+    {
+    public:
+        LowLevelILFunction(Architecture* arch, Function* func = nullptr);
+        LowLevelILFunction(BNLowLevelILFunction* func);
+
+        Ref<Function> GetFunction() const;
+        Ref<Architecture> GetArchitecture() const;
+
+        // Instruction access
+        size_t GetInstructionCount() const;
+        LowLevelILInstruction GetInstruction(size_t i) const;
+        size_t GetInstructionStart(Architecture* arch, uint64_t addr);
+
+        // Register and flag access
+        std::vector<uint32_t> GetRegisters();
+        std::vector<uint32_t> GetFlags();
+
+        // SSA form
+        std::vector<SSARegister> GetSSARegisters();
+        std::vector<SSAFlag> GetSSAFlags();
+
+        // Instruction building (for architecture plugins)
+        ExprId Nop(const ILSourceLocation& loc = ILSourceLocation());
+        ExprId SetRegister(size_t size, uint32_t reg, ExprId val, 
+                          uint32_t flags = 0,
+                          const ILSourceLocation& loc = ILSourceLocation());
+        ExprId Load(size_t size, ExprId addr,
+                   const ILSourceLocation& loc = ILSourceLocation());
+        ExprId Store(size_t size, ExprId addr, ExprId val,
+                    const ILSourceLocation& loc = ILSourceLocation());
+        // ... many more IL operations
+    };
+}
+```
+
+### Getting LLIL from a Function
+
+```cpp
+Ref<LowLevelILFunction> GetLowLevelIL() const;
+Ref<LowLevelILFunction> GetLowLevelILIfAvailable() const;
+```
+
+**Example:**
+```cpp
+Ref<Function> func = bv->GetAnalysisFunction(platform, 0x401000);
+Ref<LowLevelILFunction> llil = func->GetLowLevelIL();
+
+if (llil) {
+    cout << "LLIL instruction count: " << llil->GetInstructionCount() << endl;
+}
+```
+
+### Iterating LLIL Instructions
+
+```cpp
+for (size_t i = 0; i < llil->GetInstructionCount(); i++) {
+    LowLevelILInstruction instr = llil->GetInstruction(i);
+    
+    cout << "[" << i << "] ";
+    cout << "Operation: " << instr.operation << endl;
+    cout << "Address: 0x" << hex << instr.address << endl;
+    cout << "Size: " << dec << instr.size << endl;
+}
+```
+
+### LLIL Operations
+
+Common LLIL operations include:
+
+```cpp
+// No operation
+LLIL_NOP
+
+// Register operations
+LLIL_SET_REG      // reg = value
+LLIL_REG          // read register value
+
+// Memory operations  
+LLIL_LOAD         // read from memory
+LLIL_STORE        // write to memory
+
+// Stack operations
+LLIL_PUSH         // push value
+LLIL_POP          // pop value
+
+// Arithmetic
+LLIL_ADD, LLIL_SUB, LLIL_MUL, LLIL_DIV
+LLIL_AND, LLIL_OR, LLIL_XOR, LLIL_NOT
+LLIL_LSL, LLIL_LSR, LLIL_ASR  // shifts
+
+// Control flow
+LLIL_JUMP         // unconditional jump
+LLIL_CALL         // function call
+LLIL_RET          // return
+LLIL_IF           // conditional branch
+
+// Comparisons
+LLIL_CMP_E, LLIL_CMP_NE       // equal, not equal
+LLIL_CMP_SLT, LLIL_CMP_ULT    // signed/unsigned less than
+LLIL_CMP_SLE, LLIL_CMP_ULE    // signed/unsigned less or equal
+LLIL_CMP_SGE, LLIL_CMP_UGE    // signed/unsigned greater or equal
+LLIL_CMP_SGT, LLIL_CMP_UGT    // signed/unsigned greater than
+
+// Constants
+LLIL_CONST        // constant value
+LLIL_CONST_PTR    // constant pointer
+```
+
+From the [llil_parser example](https://github.com/Vector35/binaryninjaapi/blob/dev/examples/llil_parser/src/llil_parser.cpp:18-99).
+
+### LLIL Registers and Flags
+
+```cpp
+// Get all registers used in LLIL
+std::vector<uint32_t> regs = llil->GetRegisters();
+for (uint32_t reg : regs) {
+    cout << "Register: " << arch->GetRegisterName(reg) << endl;
+}
+
+// Get all flags used
+std::vector<uint32_t> flags = llil->GetFlags();
+for (uint32_t flag : flags) {
+    cout << "Flag: " << arch->GetFlagName(flag) << endl;
+}
+```
+
+## Medium-Level IL (MLIL)
+
+### MediumLevelILFunction Class
+
+Defined in `binaryninjaapi.h:15350`
+
+```cpp
+namespace BinaryNinja {
+    class MediumLevelILFunction :
+        public CoreRefCountObject<BNMediumLevelILFunction,
+                                   BNNewMediumLevelILFunctionReference,
+                                   BNFreeMediumLevelILFunction>
+    {
+    public:
+        MediumLevelILFunction(Architecture* arch, 
+                             Function* func = nullptr,
+                             LowLevelILFunction* lowLevelIL = nullptr);
+        MediumLevelILFunction(BNMediumLevelILFunction* func);
+
+        Ref<Function> GetFunction() const;
+        Ref<Architecture> GetArchitecture() const;
+
+        // Instruction access
+        size_t GetInstructionCount() const;
+        MediumLevelILInstruction GetInstruction(size_t i) const;
+        size_t GetInstructionStart(Architecture* arch, uint64_t addr);
+
+        // SSA form access
+        Ref<MediumLevelILFunction> GetSSAForm() const;
+        Ref<MediumLevelILFunction> GetNonSSAForm() const;
+
+        // Variables
+        std::vector<Variable> GetVariables() const;
+        std::vector<SSAVariable> GetSSAVariables() const;
+
+        // Instruction building
+        ExprId Nop(const ILSourceLocation& loc = ILSourceLocation());
+        ExprId SetVar(size_t size, const Variable& dest, ExprId src,
+                     const ILSourceLocation& loc = ILSourceLocation());
+        ExprId Load(size_t size, ExprId src,
+                   const ILSourceLocation& loc = ILSourceLocation());
+        ExprId Store(size_t size, ExprId dest, ExprId src,
+                    const ILSourceLocation& loc = ILSourceLocation());
+        // ... many more operations
+    };
+}
+```
+
+### Getting MLIL from a Function
+
+```cpp
+Ref<MediumLevelILFunction> GetMediumLevelIL() const;
+Ref<MediumLevelILFunction> GetMediumLevelILIfAvailable() const;
+```
+
+**Example:**
+```cpp
+Ref<Function> func = bv->GetAnalysisFunction(platform, 0x401000);
+Ref<MediumLevelILFunction> mlil = func->GetMediumLevelIL();
+
+if (mlil) {
+    cout << "MLIL instruction count: " << mlil->GetInstructionCount() << endl;
+    
+    // Get SSA form
+    Ref<MediumLevelILFunction> ssaForm = mlil->GetSSAForm();
+    if (ssaForm) {
+        cout << "SSA instruction count: " << ssaForm->GetInstructionCount() << endl;
+    }
+}
+```
+
+### MLIL Operations
+
+Common MLIL operations include:
+
+```cpp
+// Variable operations
+MLIL_SET_VAR        // var = value
+MLIL_VAR            // read variable
+MLIL_SET_VAR_FIELD  // var.field = value
+MLIL_VAR_FIELD      // read var.field
+
+// SSA operations
+MLIL_SET_VAR_SSA    // var#version = value
+MLIL_VAR_SSA        // read var#version
+MLIL_VAR_PHI        // SSA phi function
+
+// Memory operations
+MLIL_LOAD           // read from memory
+MLIL_STORE          // write to memory
+MLIL_LOAD_STRUCT    // read struct field
+MLIL_STORE_STRUCT   // write struct field
+
+// Arithmetic and logic
+MLIL_ADD, MLIL_SUB, MLIL_MUL, MLIL_DIV
+MLIL_AND, MLIL_OR, MLIL_XOR, MLIL_NOT
+MLIL_LSL, MLIL_LSR, MLIL_ASR
+
+// Control flow
+MLIL_CALL           // function call
+MLIL_CALL_SSA       // function call (SSA)
+MLIL_RET            // return
+MLIL_IF             // conditional
+MLIL_GOTO           // unconditional jump
+
+// Comparisons
+MLIL_CMP_E, MLIL_CMP_NE
+MLIL_CMP_SLT, MLIL_CMP_ULT
+MLIL_CMP_SLE, MLIL_CMP_ULE
+MLIL_CMP_SGE, MLIL_CMP_UGE
+MLIL_CMP_SGT, MLIL_CMP_UGT
+```
+
+### Working with Variables
+
+```cpp
+Ref<MediumLevelILFunction> mlil = func->GetMediumLevelIL();
+
+// Get all variables
+std::vector<Variable> vars = mlil->GetVariables();
+for (const auto& var : vars) {
+    cout << "Variable: " << func->GetVariableName(var) << endl;
+    Ref<Type> type = func->GetVariableType(var);
+    if (type) {
+        cout << "  Type: " << type->GetString() << endl;
+    }
+}
+
+// Get SSA variables (with version numbers)
+Ref<MediumLevelILFunction> ssaForm = mlil->GetSSAForm();
+if (ssaForm) {
+    std::vector<SSAVariable> ssaVars = ssaForm->GetSSAVariables();
+    for (const auto& ssaVar : ssaVars) {
+        cout << "SSA Variable: " << func->GetVariableName(ssaVar.var)
+             << "#" << ssaVar.version << endl;
+    }
+}
+```
+
+## High-Level IL (HLIL)
+
+### HighLevelILFunction Class
+
+Defined in `binaryninjaapi.h:15756`
+
+```cpp
+namespace BinaryNinja {
+    class HighLevelILFunction :
+        public CoreRefCountObject<BNHighLevelILFunction,
+                                   BNNewHighLevelILFunctionReference,
+                                   BNFreeHighLevelILFunction>
+    {
+    public:
+        HighLevelILFunction(Architecture* arch,
+                           Function* func = nullptr);
+        HighLevelILFunction(BNHighLevelILFunction* func);
+
+        Ref<Function> GetFunction() const;
+
+        // Instruction access
+        size_t GetInstructionCount() const;
+        HighLevelILInstruction GetInstruction(size_t i) const;
+        HighLevelILInstruction GetRootInstruction() const;
+
+        // SSA form
+        Ref<HighLevelILFunction> GetSSAForm() const;
+        Ref<HighLevelILFunction> GetNonSSAForm() const;
+
+        // ... more methods
+    };
+}
+```
+
+### Getting HLIL from a Function
+
+```cpp
+Ref<HighLevelILFunction> GetHighLevelIL() const;
+Ref<HighLevelILFunction> GetHighLevelILIfAvailable() const;
+```
+
+**Example:**
+```cpp
+Ref<Function> func = bv->GetAnalysisFunction(platform, 0x401000);
+Ref<HighLevelILFunction> hlil = func->GetHighLevelIL();
+
+if (hlil) {
+    cout << "HLIL instruction count: " << hlil->GetInstructionCount() << endl;
+    
+    // Get root instruction (represents entire function body)
+    HighLevelILInstruction root = hlil->GetRootInstruction();
+}
+```
+
+### HLIL Operations
+
+HLIL provides high-level language constructs:
+
+```cpp
+// Variables
+HLIL_VAR          // variable reference
+HLIL_VAR_INIT     // variable initialization
+HLIL_ASSIGN       // assignment
+
+// Control flow
+HLIL_IF           // if statement
+HLIL_WHILE        // while loop
+HLIL_FOR          // for loop
+HLIL_SWITCH       // switch statement
+HLIL_CASE         // case label
+HLIL_BREAK        // break statement
+HLIL_CONTINUE     // continue statement
+HLIL_GOTO         // goto statement
+
+// Function calls
+HLIL_CALL         // function call
+HLIL_RET          // return statement
+
+// Memory and structures
+HLIL_STRUCT_FIELD // struct field access
+HLIL_ARRAY_INDEX  // array indexing
+HLIL_DEREF        // pointer dereference
+HLIL_ADDRESS_OF   // address-of operator
+
+// Expressions
+HLIL_ADD, HLIL_SUB, HLIL_MUL, HLIL_DIV
+HLIL_AND, HLIL_OR, HLIL_XOR, HLIL_NOT
+HLIL_CMP_E, HLIL_CMP_NE, etc.
+```
+
+## IL Instruction Objects
+
+Each IL level provides instruction objects with helper methods:
+
+### LowLevelILInstruction
+
+```cpp
+struct LowLevelILInstruction {
+    BNLowLevelILOperation operation;
+    size_t size;
+    uint64_t address;
+    uint32_t sourceOperand;
+    
+    // Operand access helpers
+    uint64_t GetRawOperandAsInteger(size_t operand) const;
+    ExprId GetRawOperandAsExpr(size_t operand) const;
+    // ... more helpers
+};
+```
+
+### MediumLevelILInstruction
+
+```cpp
+struct MediumLevelILInstruction {
+    BNMediumLevelILOperation operation;
+    size_t size;
+    uint64_t address;
+    uint32_t sourceOperand;
+    
+    // Operand access helpers
+    Variable GetVariable() const;
+    SSAVariable GetSSAVariable() const;
+    ExprId GetSourceExpr() const;
+    ExprId GetDestExpr() const;
+    // ... more helpers
+};
+```
+
+### HighLevelILInstruction
+
+```cpp
+struct HighLevelILInstruction {
+    BNHighLevelILOperation operation;
+    size_t size;
+    
+    // Operand access
+    ExprId GetCondition() const;
+    ExprId GetTrueTarget() const;
+    ExprId GetFalseTarget() const;
+    std::vector<ExprId> GetOperands() const;
+    // ... more helpers
+};
+```
+
+## Complete LLIL Example
+
+From the [llil_parser example](https://github.com/Vector35/binaryninjaapi/tree/dev/examples/llil_parser):
+
+```cpp
+#include "binaryninjaapi.h"
+#include "lowlevelilinstruction.h"
+#include <iostream>
+
+using namespace BinaryNinja;
+using namespace std;
+
+void PrintLLIL(Ref<LowLevelILFunction> llil) {
+    for (size_t i = 0; i < llil->GetInstructionCount(); i++) {
+        LowLevelILInstruction instr = llil->GetInstruction(i);
+        
+        cout << "[" << dec << i << "] ";
+        cout << "@0x" << hex << instr.address << ": ";
+        
+        switch (instr.operation) {
+            case LLIL_SET_REG:
+                cout << "SET_REG ";
+                // Print register and value
+                break;
+            case LLIL_LOAD:
+                cout << "LOAD size=" << dec << instr.size;
+                break;
+            case LLIL_STORE:
+                cout << "STORE size=" << dec << instr.size;
+                break;
+            case LLIL_CALL:
+                cout << "CALL";
+                break;
+            // ... handle other operations
+            default:
+                cout << "Operation: " << instr.operation;
+                break;
+        }
+        cout << endl;
+    }
+}
+
+int main(int argc, char* argv[]) {
+    SetBundledPluginDirectory(GetBundledPluginDirectory());
+    InitPlugins();
+
+    Ref<BinaryView> bv = BinaryNinja::Load(argv[1]);
+    if (!bv) return -1;
+
+    auto funcs = bv->GetAnalysisFunctionList();
+    for (auto func : funcs) {
+        cout << "Function: " << func->GetSymbol()->GetFullName() << endl;
+        
+        Ref<LowLevelILFunction> llil = func->GetLowLevelIL();
+        if (llil) {
+            PrintLLIL(llil);
+        }
+    }
+
+    bv->GetFile()->Close();
+    BNShutdown();
+    return 0;
+}
+```
+
+## IL Conversion
+
+You can navigate between IL levels:
+
+```cpp
+Ref<Function> func = bv->GetAnalysisFunction(platform, addr);
+
+// Get all three levels
+Ref<LowLevelILFunction> llil = func->GetLowLevelIL();
+Ref<MediumLevelILFunction> mlil = func->GetMediumLevelIL();
+Ref<HighLevelILFunction> hlil = func->GetHighLevelIL();
+
+// Convert between levels (get corresponding instruction indices)
+size_t llilIndex = 5;
+size_t mlilIndex = llil->GetMediumLevelILInstructionIndex(llilIndex);
+size_t hlilIndex = mlil->GetHighLevelILInstructionIndex(mlilIndex);
+```
+
+## See Also
+
+- [Function Class](/api/cpp/function) - Function analysis
+- [Architecture Class](/api/cpp/architecture) - Instruction lifting to IL
+- [LLIL Parser Example](https://github.com/Vector35/binaryninjaapi/tree/dev/examples/llil_parser)
+- [MLIL Parser Example](https://github.com/Vector35/binaryninjaapi/tree/dev/examples/mlil_parser)

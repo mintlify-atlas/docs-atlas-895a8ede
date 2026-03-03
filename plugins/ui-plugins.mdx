@@ -1,0 +1,348 @@
+---
+title: UI plugins
+description: Extend the Binary Ninja user interface
+---
+
+UI plugins allow you to add custom interface elements to Binary Ninja, including sidebar panels, global areas, custom views, and menu actions.
+
+<Note>
+  UI plugins require Qt 6.8.2 and are only supported in the GUI edition of Binary Ninja.
+</Note>
+
+## UI plugin types
+
+<CardGroup cols={2}>
+  <Card title="Sidebar widgets" icon="sidebar">
+    Add panels to the left/right sidebar (like Symbols, Cross References)
+  </Card>
+  <Card title="Global areas" icon="window-maximize">
+    Add bottom panels (like Log, Console, Scripting)
+  </Card>
+  <Card title="Pane widgets" icon="window-restore">
+    Add new main view types (like Graph, Linear, Hex)
+  </Card>
+  <Card title="Context menus" icon="bars">
+    Add right-click menu actions
+  </Card>
+</CardGroup>
+
+## Building UI plugins
+
+UI plugins require Qt and must be compiled with the correct Qt version:
+
+```bash
+cmake -S . -B build -DBN_API_BUILD_EXAMPLES=ON
+cmake --build build -j8
+```
+
+<Warning>
+  Binary Ninja uses a custom Qt 6.8.2 build. Use the [official build configuration](https://github.com/Vector35/qt-build) or the official Qt installer.
+</Warning>
+
+## Example: Triage plugin
+
+The Triage plugin is a complete UI plugin that demonstrates all major features:
+
+```cpp triage.cpp
+#include "binaryninjaapi.h"
+#include "ui/uicontext.h"
+#include <QWidget>
+#include <QVBoxLayout>
+#include <QTableWidget>
+
+using namespace BinaryNinja;
+using namespace UIContext;
+
+class TriageView : public QWidget, public ViewInterface {
+    Q_OBJECT
+
+private:
+    ViewFrame* m_viewFrame;
+    BinaryViewRef m_data;
+    QTableWidget* m_table;
+
+public:
+    TriageView(QWidget* parent, BinaryViewRef data) : QWidget(parent) {
+        m_data = data;
+
+        QVBoxLayout* layout = new QVBoxLayout();
+        layout->setContentsMargins(0, 0, 0, 0);
+
+        // Create table
+        m_table = new QTableWidget();
+        m_table->setColumnCount(3);
+        m_table->setHorizontalHeaderLabels({"Address", "Type", "Name"});
+
+        // Populate with functions
+        auto functions = data->GetAnalysisFunctionList();
+        m_table->setRowCount(functions.size());
+
+        for (size_t i = 0; i < functions.size(); i++) {
+            auto func = functions[i];
+            m_table->setItem(i, 0, 
+                new QTableWidgetItem(QString::number(func->GetStart(), 16)));
+            m_table->setItem(i, 1, 
+                new QTableWidgetItem("Function"));
+            m_table->setItem(i, 2, 
+                new QTableWidgetItem(QString::fromStdString(
+                    func->GetSymbol()->GetFullName())));
+        }
+
+        layout->addWidget(m_table);
+        setLayout(layout);
+    }
+
+    virtual BinaryViewRef getData() override { return m_data; }
+    virtual uint64_t getCurrentOffset() override { return 0; }
+    virtual void setCurrentOffset(uint64_t offset) override {}
+};
+
+class TriageViewType : public ViewType {
+public:
+    TriageViewType() : ViewType("Triage", "Triage View") {}
+
+    virtual ViewInterface* create(BinaryViewRef data, ViewFrame* frame) override {
+        return new TriageView(frame, data);
+    }
+};
+
+extern "C" {
+    BN_DECLARE_CORE_ABI_VERSION
+    BINARYNINJAPLUGIN void UIPluginInit() {
+        ViewType::registerType(new TriageViewType());
+    }
+}
+```
+
+From [`examples/triage/`](https://github.com/Vector35/binaryninja-api/tree/dev/examples/triage)
+
+<Info>
+  UI plugins use `UIPluginInit()` instead of `CorePluginInit()`.
+</Info>
+
+## Creating sidebar widgets
+
+Sidebar widgets appear in the left or right sidebar:
+
+```python hello_sidebar.py
+from binaryninjaui import SidebarWidget, SidebarWidgetType, Sidebar
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+
+class MySidebarWidget(SidebarWidget):
+    def __init__(self, name, frame, data):
+        SidebarWidget.__init__(self, name)
+        self.data = data
+
+        # Create UI
+        container = QWidget()
+        layout = QVBoxLayout()
+
+        self.label = QLabel(f"Binary: {data.file.filename}")
+        layout.addWidget(self.label)
+
+        container.setLayout(layout)
+        self.setWidget(container)
+
+class MySidebarWidgetType(SidebarWidgetType):
+    def __init__(self):
+        icon = QImage(16, 16, QImage.Format_RGB32)
+        icon.fill(0)
+
+        SidebarWidgetType.__init__(self, icon, "My Sidebar")
+
+    def createWidget(self, frame, data):
+        return MySidebarWidget("My Sidebar", frame, data)
+
+# Register the sidebar
+Sidebar.addSidebarWidgetType(MySidebarWidgetType())
+```
+
+From [`python/examples/hellosidebar.py`](https://github.com/Vector35/binaryninja-api/blob/dev/python/examples/hellosidebar.py)
+
+## Creating global areas
+
+Global areas appear at the bottom (like Log, Console):
+
+```python hello_globalarea.py
+from binaryninjaui import GlobalArea, GlobalAreaWidget
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QTextEdit
+
+class MyGlobalArea(GlobalAreaWidget):
+    def __init__(self, name):
+        GlobalAreaWidget.__init__(self, name)
+
+        # Create UI
+        container = QWidget()
+        layout = QVBoxLayout()
+
+        self.text = QTextEdit()
+        self.text.setReadOnly(True)
+        self.text.setText("Custom global area content")
+
+        layout.addWidget(self.text)
+        container.setLayout(layout)
+        self.setWidget(container)
+
+# Register the global area
+my_area = MyGlobalArea("My Area")
+GlobalArea.addWidget("My Area", my_area)
+```
+
+From [`python/examples/helloglobalarea.py`](https://github.com/Vector35/binaryninja-api/blob/dev/python/examples/helloglobalarea.py)
+
+## Adding menu actions
+
+Add items to context menus:
+
+```python
+from binaryninjaui import UIAction, UIActionHandler, Menu
+
+def my_action(context):
+    print(f"Action triggered for {context.binaryView.file.filename}")
+
+# Register action
+UIAction.registerAction("My Plugin\\My Action")
+UIActionHandler.globalActions().bindAction(
+    "My Plugin\\My Action",
+    UIAction(my_action)
+)
+
+# Add to menu
+Menu.mainMenu("Plugins").addAction("My Plugin\\My Action", "My Group")
+```
+
+## Custom notifications
+
+Receive UI notifications:
+
+```python
+from binaryninjaui import UIContext
+
+class MyUINotification:
+    def OnViewChange(self, context, frame, type):
+        print(f"View changed to {type}")
+
+    def OnAddressChange(self, context, frame, view, location):
+        print(f"Address changed to {hex(location.getOffset())}")
+
+# Register notification
+notification = MyUINotification()
+UIContext.registerNotification(notification)
+```
+
+From [`python/examples/ui_notification_callbacks.py`](https://github.com/Vector35/binaryninja-api/blob/dev/python/examples/ui_notification_callbacks.py)
+
+## Settings and preferences
+
+UI plugins can add settings to preferences:
+
+```python
+from binaryninja import Settings
+from binaryninjaui import SettingsUIGroup
+
+# Register setting
+Settings().register_group("myplugin", "My Plugin")
+Settings().register_setting(
+    "myplugin.show_details",
+    '''{
+        "title": "Show Details",
+        "type": "boolean",
+        "default": true,
+        "description": "Show detailed information"
+    }'''
+)
+
+# Create UI for settings (optional)
+group = SettingsUIGroup()
+group.addBoolSetting("myplugin.show_details", "Show Details")
+```
+
+## Theming and styling
+
+UI plugins should respect the user's theme:
+
+```python
+from binaryninjaui import getThemeColor
+
+# Get theme colors
+bg_color = getThemeColor(ThemeColor.BackgroundColor)
+fg_color = getThemeColor(ThemeColor.ForegroundColor)
+highlight_color = getThemeColor(ThemeColor.HighlightColor)
+
+# Apply to widget
+widget.setStyleSheet(f"""
+    QWidget {{
+        background-color: {bg_color.name()};
+        color: {fg_color.name()};
+    }}
+""")
+```
+
+## Best practices
+
+<AccordionGroup>
+  <Accordion title="Use background threads for analysis">
+    Never block the UI thread with long operations:
+
+    ```python
+    from binaryninja import BackgroundTaskThread
+
+    class AnalysisTask(BackgroundTaskThread):
+        def __init__(self, widget):
+            BackgroundTaskThread.__init__(self, "Analyzing", True)
+            self.widget = widget
+
+        def run(self):
+            # Long operation
+            result = perform_analysis()
+
+            # Update UI in main thread
+            execute_on_main_thread(lambda: self.widget.update(result))
+
+    task = AnalysisTask(my_widget)
+    task.start()
+    ```
+  </Accordion>
+
+  <Accordion title="Clean up resources">
+    Override `__del__` or `closeEvent` to clean up:
+
+    ```python
+    def __del__(self):
+        # Unregister notifications
+        UIContext.unregisterNotification(self.notification)
+
+        # Cancel background tasks
+        if self.task:
+            self.task.cancel()
+    ```
+  </Accordion>
+
+  <Accordion title="Handle view changes">
+    Update your UI when the view changes:
+
+    ```python
+    def OnViewChange(self, context, frame, type):
+        if self.frame == frame:
+            self.updateContent()
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Example plugins
+
+- **Triage**: [`examples/triage/`](https://github.com/Vector35/binaryninja-api/tree/dev/examples/triage) - Complete UI plugin
+- **Sidebar**: [`python/examples/hellosidebar.py`](https://github.com/Vector35/binaryninja-api/blob/dev/python/examples/hellosidebar.py)
+- **Global Area**: [`python/examples/helloglobalarea.py`](https://github.com/Vector35/binaryninja-api/blob/dev/python/examples/helloglobalarea.py)
+- **Pane**: [`python/examples/hellopane.py`](https://github.com/Vector35/binaryninja-api/blob/dev/python/examples/hellopane.py)
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Workflow plugins" href="/plugins/workflow-plugins">
+    Modify analysis pipeline
+  </Card>
+  <Card title="Architecture plugins" href="/plugins/architecture-plugins">
+    Add CPU architecture support
+  </Card>
+</CardGroup>

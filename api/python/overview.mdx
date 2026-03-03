@@ -1,0 +1,254 @@
+---
+title: Python API Overview
+description: Binary Ninja Python API reference and usage guide
+---
+
+The Binary Ninja Python API provides comprehensive access to binary analysis capabilities, allowing you to automate analysis tasks, write plugins, and interact with Binary Ninja programmatically.
+
+## Getting Started
+
+The Binary Ninja Python API can be used in several ways:
+
+1. **Interactive Python Console** - Available within Binary Ninja UI
+2. **Headless Scripts** - Standalone Python scripts using the API
+3. **Plugins** - Extend Binary Ninja functionality
+
+### Basic Usage
+
+```python
+from binaryninja import *
+
+# Load a binary
+bv = load("/bin/ls")
+
+# Access functions
+for func in bv.functions:
+    print(f"Function: {func.name} at {func.start:#x}")
+
+# Iterate through instructions
+for func in bv.functions:
+    for block in func:
+        for instr in block:
+            print(f"{instr.address:#x}: {instr}")
+```
+
+## Core Components
+
+The Binary Ninja Python API is organized into several key modules:
+
+<CardGroup cols={2}>
+  <Card title="BinaryView" icon="file-binary" href="/api/python/binaryview">
+    Access and manipulate binary files, segments, sections, and raw data
+  </Card>
+  
+  <Card title="Function" icon="function" href="/api/python/function">
+    Work with functions, basic blocks, and disassembly
+  </Card>
+  
+  <Card title="Architecture" icon="microchip" href="/api/python/architecture">
+    Interact with CPU architectures and instruction sets
+  </Card>
+  
+  <Card title="Types" icon="shapes" href="/api/python/types">
+    Define and manipulate type information
+  </Card>
+</CardGroup>
+
+<CardGroup cols={3}>
+  <Card title="Low Level IL" icon="code" href="/api/python/lowlevelil">
+    Access low-level intermediate language
+  </Card>
+  
+  <Card title="Medium Level IL" icon="code" href="/api/python/mediumlevelil">
+    Work with medium-level IL
+  </Card>
+  
+  <Card title="High Level IL" icon="code" href="/api/python/highlevelil">
+    Use high-level decompiler output
+  </Card>
+</CardGroup>
+
+<CardGroup cols={3}>
+  <Card title="Platform" icon="server" href="/api/python/platform">
+    Configure OS and calling conventions
+  </Card>
+  
+  <Card title="Settings" icon="gear" href="/api/python/settings">
+    Manage Binary Ninja settings
+  </Card>
+</CardGroup>
+
+## Python 3.0 API Changes
+
+Binary Ninja 3.0 introduced significant improvements to the Python API:
+
+### Type System Improvements
+
+<Note>
+In Binary Ninja 3.0, `Structure`, `Enumeration`, and `NamedTypeReference` now inherit directly from `Type` instead of being members of it.
+</Note>
+
+**Before (2.x):**
+```python
+bv.types['_GUID'].structure.members
+```
+
+**After (3.0):**
+```python
+bv.types['_GUID'].members
+```
+
+### Symbol Changes
+
+Symbols are now split into `CoreSymbol` and `Symbol` for cleaner construction:
+
+- `CoreSymbol` - Returned from the core (e.g., `bv.get_symbol_at()`)
+- `Symbol` - Created by users for new symbols
+
+### IL Instruction Refactor
+
+IL instructions now use class hierarchies instead of dictionaries:
+
+**Before (2.x):**
+```python
+for i in il:
+    if i.operation in [LLIL_CONST, MLIL_CONST, HLIL_CONST]:
+        print(i.value)
+```
+
+**After (3.0):**
+```python
+from binaryninja.commonil import Constant
+
+for i in il:
+    if isinstance(i, Constant):
+        print(i.value)
+```
+
+### Variable Object Enhancements
+
+Variables now have direct property access:
+
+**Before (2.x):**
+```python
+f.create_user_var(v, v.type, "new_name")
+```
+
+**After (3.0):**
+```python
+v.name = "new_name"
+v.type = Type.char()
+```
+
+### Performance Improvements
+
+Binary Ninja 3.0 includes major performance optimizations:
+
+- `bv.functions[0]` - **28x faster**
+- `bv.types['_GUID']` - **1688x faster**  
+- `bv.symbols['shutdown']` - **6814x faster**
+- HLIL iteration - **3.7x faster**
+
+### AdvancedILFunctionList
+
+For parallel IL generation across multiple cores:
+
+```python
+from binaryninja import AdvancedILFunctionList
+
+for f in AdvancedILFunctionList(bv, preload_limit=400):
+    analyze_function(f.hlil)
+```
+
+## Common Patterns
+
+### Opening Files
+
+```python
+# With automatic analysis
+bv = load("/path/to/binary")
+
+# With custom options
+bv = load("/path/to/binary", options={
+    'analysis.mode': 'full',
+    'analysis.linearSweep.autorun': True
+})
+
+# Close when done (for headless scripts)
+bv.file.close()
+```
+
+### Working with Functions
+
+```python
+# Get function by address
+func = bv.get_function_at(0x401000)
+
+# Get function by name
+func = bv.get_functions_by_name('main')[0]
+
+# Iterate basic blocks
+for block in func:
+    print(f"Block at {block.start:#x}")
+    for instr in block:
+        print(f"  {instr.address:#x}: {instr}")
+```
+
+### Analyzing IL
+
+```python
+# Access different IL levels
+llil = func.llil
+mlil = func.mlil  
+hlil = func.hlil
+
+# Iterate IL instructions
+for instr in hlil.instructions:
+    print(instr)
+    
+# Get IL for specific address
+hlil_instr = func.get_high_level_il_at(address)
+```
+
+### Type Operations
+
+```python
+# Create types
+int_type = Type.int(4)
+ptr_type = Type.pointer(bv.arch, int_type)
+struct_type = Type.structure([
+    (Type.int(4), "field1"),
+    (Type.pointer(bv.arch, Type.char()), "field2")
+])
+
+# Apply types
+func.return_type = Type.int(4)
+bv.define_user_type("MyStruct", struct_type)
+```
+
+## Additional Resources
+
+- [API Documentation](https://api.binary.ninja/) - Complete API reference
+- [Example Scripts](/examples) - Sample code and plugins
+- [GitHub Repository](https://github.com/Vector35/binaryninja-api) - API source code
+- [Community Plugins](https://github.com/Vector35/community-plugins) - Plugin examples
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Explore BinaryView" href="/api/python/binaryview">
+    Learn how to access binary data and metadata
+  </Card>
+  
+  <Card title="Work with Functions" href="/api/python/function">
+    Understand function analysis and manipulation
+  </Card>
+  
+  <Card title="Use IL Representations" href="/api/python/highlevelil">
+    Start with High Level IL for decompilation
+  </Card>
+  
+  <Card title="Define Types" href="/api/python/types">
+    Create and apply type information
+  </Card>
+</CardGroup>

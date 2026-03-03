@@ -1,0 +1,428 @@
+---
+title: Platform API
+description: Configure platforms, operating systems, and calling conventions
+---
+
+The `Platform` class represents the combination of an operating system and architecture, defining calling conventions, type libraries, and platform-specific behaviors.
+
+## Overview
+
+Platforms in Binary Ninja encapsulate:
+
+- **Architecture** - CPU instruction set
+- **Operating System** - OS-specific conventions
+- **Calling Conventions** - Function call ABIs
+- **Type Libraries** - Platform-specific types
+- **System Call Numbers** - Syscall mappings
+
+### Getting Platforms
+
+```python
+from binaryninja import Platform
+
+# Get platform by name
+linux_x64 = Platform['linux-x86_64']
+windows_x64 = Platform['windows-x86_64']
+mac_arm64 = Platform['mac-aarch64']
+
+# List all platforms
+for platform in Platform:
+    print(f"{platform.name}: {platform.arch.name}")
+
+# From BinaryView
+platform = bv.platform
+
+# From architecture (bare platform)
+bare_platform = arch.standalone_platform
+```
+
+## Platform Class
+
+### Core Properties
+
+<ParamField path="name" type="str">
+  Platform name (e.g., "linux-x86_64")
+</ParamField>
+
+<ParamField path="arch" type="Architecture">
+  Architecture for this platform
+</ParamField>
+
+<ParamField path="calling_conventions" type="list[CallingConvention]">
+  Available calling conventions
+</ParamField>
+
+<ParamField path="default_calling_convention" type="CallingConvention">
+  Default calling convention
+</ParamField>
+
+<ParamField path="system_call_convention" type="CallingConvention">
+  Calling convention for system calls
+</ParamField>
+
+<ParamField path="global_regs" type="list[str]">
+  Global/preserved registers
+</ParamField>
+
+### Platform Lookup
+
+```python
+# Check if platform exists
+if 'linux-x86_64' in Platform:
+    platform = Platform['linux-x86_64']
+
+# Safe get with default
+platform = Platform.get('unknown-platform', None)
+if platform is None:
+    print("Platform not found")
+
+# Available platforms
+platforms = list(Platform)
+print(f"Found {len(platforms)} platforms")
+```
+
+## Calling Conventions
+
+Calling conventions define how functions receive parameters and return values.
+
+### Getting Calling Conventions
+
+```python
+# Get all calling conventions for platform
+for cc in platform.calling_conventions:
+    print(f"Calling convention: {cc.name}")
+
+# Get default
+default_cc = platform.default_calling_convention
+print(f"Default: {default_cc.name}")
+
+# Get by name
+cc = platform.get_calling_convention_by_name('cdecl')
+if cc:
+    print(f"Found: {cc.name}")
+
+# System call convention
+syscall_cc = platform.system_call_convention
+```
+
+### CallingConvention Properties
+
+<ParamField path="name" type="str">
+  Calling convention name
+</ParamField>
+
+<ParamField path="int_arg_regs" type="list[str]">
+  Registers for integer arguments
+</ParamField>
+
+<ParamField path="float_arg_regs" type="list[str]">
+  Registers for floating-point arguments
+</ParamField>
+
+<ParamField path="int_return_reg" type="str">
+  Register for integer return value
+</ParamField>
+
+<ParamField path="high_int_return_reg" type="str">
+  Register for high part of large integer returns
+</ParamField>
+
+<ParamField path="caller_saved_regs" type="list[str]">
+  Registers saved by caller
+</ParamField>
+
+<ParamField path="callee_saved_regs" type="list[str]">
+  Registers saved by callee
+</ParamField>
+
+### Working with Calling Conventions
+
+```python
+cc = platform.default_calling_convention
+
+print(f"Calling convention: {cc.name}")
+print(f"Integer argument registers: {cc.int_arg_regs}")
+print(f"Return register: {cc.int_return_reg}")
+print(f"Caller-saved: {cc.caller_saved_regs}")
+print(f"Callee-saved: {cc.callee_saved_regs}")
+
+# Apply to function
+func.calling_convention = cc
+
+# Get parameter locations
+for i, reg in enumerate(cc.int_arg_regs):
+    print(f"Parameter {i} in {reg}")
+```
+
+## Type Libraries
+
+Platforms provide access to OS-specific type definitions.
+
+### Loading Type Libraries
+
+```python
+# Get type libraries for platform
+type_libs = platform.type_libraries
+
+for lib in type_libs:
+    print(f"Type library: {lib.name}")
+
+# Get by name
+libc = platform.get_type_libraries_by_name('libc')
+if libc:
+    lib = libc[0]
+    print(f"Found libc: {lib.name}")
+    
+    # List types in library
+    for name, type_obj in lib.named_types.items():
+        print(f"  {name}: {type_obj}")
+
+# Import type from library
+bv.import_library_type('FILE')
+bv.import_library_object('printf')
+```
+
+### Common Platform Types
+
+```python
+# Import common types
+common_types = [
+    'size_t',
+    'ssize_t', 
+    'off_t',
+    'pid_t',
+    'FILE',
+    'DIR'
+]
+
+for type_name in common_types:
+    try:
+        bv.import_library_type(type_name)
+        print(f"Imported {type_name}")
+    except:
+        print(f"Could not import {type_name}")
+```
+
+## Global Registers
+
+Registers with global/preserved values:
+
+```python
+# Get global registers
+for reg in platform.global_regs:
+    print(f"Global register: {reg}")
+
+# Check if register is global
+if 'fs' in platform.global_regs:
+    print("FS is a global register")
+```
+
+## Custom Platforms
+
+Create platform subclasses for custom environments:
+
+```python
+from binaryninja import Platform, CallingConvention
+
+class MyPlatform(Platform):
+    name = "my-custom-platform"
+    
+    def __init__(self, arch):
+        super().__init__(arch)
+    
+    def view_init(self, view):
+        """Called when BinaryView is initialized."""
+        # Perform platform-specific initialization
+        pass
+
+# Register the platform
+MyPlatform.register('x86_64')
+
+# Use the platform
+custom_platform = Platform['my-custom-platform']
+```
+
+## Platform Detection
+
+Binary Ninja automatically detects platforms, but you can override:
+
+```python
+# Get current platform
+print(f"Platform: {bv.platform.name}")
+
+# Change platform
+new_platform = Platform['linux-x86_64']
+bv.platform = new_platform
+
+# This affects:
+# - Default calling convention
+# - Available type libraries  
+# - System call interpretation
+```
+
+## Example: Platform Comparison
+
+```python
+def compare_platforms(platform_names):
+    """Compare calling conventions across platforms."""
+    for name in platform_names:
+        platform = Platform.get(name)
+        if not platform:
+            continue
+        
+        print(f"\nPlatform: {name}")
+        print(f"  Architecture: {platform.arch.name}")
+        
+        cc = platform.default_calling_convention
+        print(f"  Default CC: {cc.name}")
+        print(f"  Int args: {', '.join(cc.int_arg_regs[:4])}")
+        print(f"  Return: {cc.int_return_reg}")
+        print(f"  Callee-saved: {', '.join(cc.callee_saved_regs)}")
+
+# Usage
+compare_platforms([
+    'linux-x86_64',
+    'windows-x86_64',
+    'mac-x86_64',
+    'linux-aarch64'
+])
+```
+
+## Example: Import Common Types
+
+```python
+def import_platform_types(bv):
+    """Import commonly used platform types."""
+    # Standard types
+    std_types = [
+        'size_t', 'ssize_t', 'off_t', 'time_t',
+        'int8_t', 'int16_t', 'int32_t', 'int64_t',
+        'uint8_t', 'uint16_t', 'uint32_t', 'uint64_t'
+    ]
+    
+    # Platform-specific types
+    if 'windows' in bv.platform.name:
+        platform_types = [
+            'HANDLE', 'HWND', 'HINSTANCE', 'HMODULE',
+            'DWORD', 'WORD', 'BYTE',
+            'LPSTR', 'LPCSTR', 'LPWSTR', 'LPCWSTR'
+        ]
+    elif 'linux' in bv.platform.name or 'mac' in bv.platform.name:
+        platform_types = [
+            'FILE', 'DIR', 'pid_t', 'uid_t', 'gid_t',
+            'mode_t', 'dev_t', 'ino_t'
+        ]
+    else:
+        platform_types = []
+    
+    all_types = std_types + platform_types
+    imported = []
+    failed = []
+    
+    for type_name in all_types:
+        try:
+            bv.import_library_type(type_name)
+            imported.append(type_name)
+        except:
+            failed.append(type_name)
+    
+    print(f"Imported {len(imported)} types")
+    if failed:
+        print(f"Failed to import: {', '.join(failed)}")
+    
+    return imported
+
+# Usage
+imported = import_platform_types(bv)
+```
+
+## Example: Analyze Calling Convention
+
+```python
+def analyze_function_abi(func):
+    """Analyze how a function uses calling convention."""
+    cc = func.calling_convention
+    platform = func.platform
+    
+    result = {
+        'name': func.name,
+        'address': func.start,
+        'cc': cc.name,
+        'parameters': [],
+        'return_type': str(func.return_type),
+        'non_standard': []
+    }
+    
+    # Analyze parameters
+    for i, param in enumerate(func.parameter_vars):
+        param_info = {
+            'index': i,
+            'name': param.name,
+            'type': str(param.type),
+            'storage': str(param.storage)
+        }
+        
+        # Check if using expected register
+        if i < len(cc.int_arg_regs):
+            expected_reg = cc.int_arg_regs[i]
+            if expected_reg not in str(param.storage):
+                result['non_standard'].append(
+                    f"Param {i} not in {expected_reg}"
+                )
+        
+        result['parameters'].append(param_info)
+    
+    return result
+
+# Usage
+for func in bv.functions[:10]:
+    info = analyze_function_abi(func)
+    print(f"{info['name']}: {info['cc']}")
+    if info['non_standard']:
+        for note in info['non_standard']:
+            print(f"  Note: {note}")
+```
+
+## Platform-Specific Settings
+
+Configure platform behavior:
+
+```python
+# Address size
+addr_size = platform.address_size
+print(f"Address size: {addr_size} bytes")
+
+# Adjust type parser input (advanced)
+def adjust_parser_input(platform, parser, arguments, source_files):
+    """Customize type parser for platform."""
+    # Add platform-specific includes
+    if 'linux' in platform.name:
+        arguments.extend(['-D__linux__', '-D_GNU_SOURCE'])
+    elif 'windows' in platform.name:
+        arguments.extend(['-D_WIN32', '-DWIN32'])
+    
+    return arguments, source_files
+```
+
+## Related OS Platforms
+
+```python
+# Get related platforms
+arch = Architecture['x86_64']
+
+# Find all platforms for architecture
+platforms_for_arch = [
+    p for p in Platform 
+    if p.arch.name == arch.name
+]
+
+for p in platforms_for_arch:
+    print(f"{p.name}: {p.arch.name}")
+```
+
+## See Also
+
+- [Architecture API](/api/python/architecture) - CPU architectures
+- [Types API](/api/python/types) - Type system
+- [Function API](/api/python/function) - Function analysis
+- [BinaryView API](/api/python/binaryview) - Binary files

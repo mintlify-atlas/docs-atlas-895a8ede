@@ -1,0 +1,532 @@
+---
+title: 'Collaboration and Enterprise'
+description: 'Work with teams using Binary Ninja Enterprise collaboration features'
+icon: 'users'
+---
+
+## Overview
+
+Binary Ninja Enterprise provides powerful collaboration features for teams working on reverse engineering projects. This guide demonstrates how to use the collaboration API to manage projects, sync analysis, and work with remote servers.
+
+## Enterprise Architecture
+
+<Steps>
+  <Step title="Remote Server">
+    Central collaboration server hosting projects and files
+  </Step>
+  <Step title="Projects">
+    Collections of related binary analysis files
+  </Step>
+  <Step title="Files">
+    Individual binaries with analysis databases (BNDBs)
+  </Step>
+  <Step title="Snapshots">
+    Point-in-time saves of analysis state
+  </Step>
+</Steps>
+
+## Connecting to Remote Server
+
+Establish connection to a Binary Ninja Enterprise server.
+
+<Tabs>
+  <Tab title="Enterprise Remote">
+    ```python
+    import binaryninja.enterprise as enterprise
+    import binaryninja.collaboration as collaboration
+
+    # Get enterprise remote (configured in Enterprise settings)
+    with enterprise.LicenseCheckout():
+        remote = collaboration.enterprise_remote()
+
+        if not remote:
+            print("No enterprise remote configured")
+            return
+
+        # Connect using Enterprise credentials
+        if not remote.is_connected:
+            remote.connect()
+
+        print(f"Connected to {remote.name} @ {remote.address}")
+        print(f"Server version: {remote.server_version}")
+        print(f"User: {remote.username}")
+        print(f"Admin: {remote.is_admin}")
+    ```
+  </Tab>
+
+  <Tab title="Custom Remote">
+    ```python
+    from binaryninja.collaboration import Remote
+
+    # Create and save custom remote
+    remote = Remote("My Server", "https://collab.example.com")
+    collaboration.add_known_remote(remote)
+    collaboration.save_remotes()
+
+    # Connect with credentials
+    remote.connect(username="user", password="pass")
+
+    # Or use token authentication
+    # remote.connect(token="api_token_here")
+    ```
+  </Tab>
+
+  <Tab title="List Remotes">
+    ```python
+    # List all configured remotes
+    for remote in collaboration.known_remotes():
+        print(f"{remote.name} @ {remote.address}")
+        if remote.is_connected:
+            print(f"  Connected as: {remote.username}")
+            print(f"  Projects: {len(remote.projects)}")
+    ```
+  </Tab>
+</Tabs>
+
+## Managing Projects
+
+Create and manage collaborative projects.
+
+<Steps>
+  <Step title="Create Project">
+    ```python
+    # Create new project
+    project = remote.create_project(
+        "Malware Analysis",
+        "Analysis of malware samples"
+    )
+
+    print(f"Created project: {project.name}")
+    print(f"Project ID: {project.id}")
+    print(f"URL: {project.url}")
+    ```
+  </Step>
+
+  <Step title="List Projects">
+    ```python
+    # List all projects
+    for project in remote.projects:
+        print(f"{project.name}")
+        print(f"  Description: {project.description}")
+        print(f"  Created: {project.created}")
+        print(f"  Files: {len(project.files)}")
+        print(f"  Admin: {project.is_admin}")
+    ```
+  </Step>
+
+  <Step title="Get Project by Name">
+    ```python
+    # Find specific project
+    project = remote.get_project_by_name("Malware Analysis")
+
+    if project is None:
+        print("Project not found")
+    else:
+        print(f"Found project: {project.name}")
+        print(f"Default path: {project.default_path}")
+    ```
+  </Step>
+
+  <Step title="Delete Project">
+    ```python
+    # Delete project (admin only)
+    if project.is_admin:
+        remote.delete_project(project)
+        print(f"Deleted project: {project.name}")
+    else:
+        print("Must be admin to delete project")
+    ```
+  </Step>
+</Steps>
+
+## Working with Files
+
+Upload, download, and sync binary analysis files.
+
+<Tabs>
+  <Tab title="Upload File">
+    ```python
+    # Upload binary to project
+    file = project.upload_new_file(
+        "/path/to/malware.exe",
+        progress=lambda cur, max: print(f"Upload: {cur}/{max}")
+    )
+
+    print(f"Uploaded: {file.name}")
+    print(f"File ID: {file.id}")
+    print(f"Hash: {file.hash}")
+    print(f"Size: {file.size} bytes")
+
+    # Set description
+    file.description = "Suspicious executable from incident #1234"
+    ```
+  </Tab>
+
+  <Tab title="Download File">
+    ```python
+    # Get file from project
+    file = project.get_file_by_name("malware.exe")
+
+    if file:
+        # Download to default location
+        file.download(
+            progress=lambda cur, max: print(f"Download: {cur}/{max}")
+        )
+
+        print(f"Downloaded to: {file.default_path}")
+
+        # Or download to specific path
+        # file.download(path="/custom/path/file.bndb")
+    ```
+  </Tab>
+
+  <Tab title="List Files">
+    ```python
+    # List all files in project
+    for file in project.files:
+        print(f"{file.name}")
+        print(f"  Description: {file.description}")
+        print(f"  Created: {file.created}")
+        print(f"  Last modified: {file.last_modified}")
+        print(f"  Snapshots: {len(file.snapshots)}")
+    ```
+  </Tab>
+</Tabs>
+
+## Syncing Analysis
+
+Sync local analysis changes with the remote server.
+
+<Steps>
+  <Step title="Open File for Analysis">
+    ```python
+    import binaryninja
+    from binaryninja.collaboration import RemoteFile
+
+    # Download and open file
+    file.download()
+
+    with binaryninja.load(file.default_path) as bv:
+        # Verify it's a collaboration file
+        assert RemoteFile.get_for_bv(bv) == file
+
+        print(f"Analyzing {file.name}")
+    ```
+  </Step>
+
+  <Step title="Make Analysis Changes">
+    ```python
+    # Make changes to analysis
+    entry_func = bv.entry_function
+    if entry_func:
+        # Rename function
+        entry_func.name = "main_entry"
+
+        # Add comment
+        entry_func.set_comment_at(entry_func.start, "Program entry point")
+
+        # Create type
+        from binaryninja.types import Type
+        bv.define_user_type("config_t", Type.structure_type([
+            (Type.int(4), "version"),
+            (Type.int(4), "flags")
+        ]))
+    ```
+  </Step>
+
+  <Step title="Save Snapshot">
+    ```python
+    # Save local snapshot
+    bv.file.save_auto_snapshot()
+
+    print("Snapshot saved locally")
+    ```
+  </Step>
+
+  <Step title="Sync with Server">
+    ```python
+    # Sync changes to server
+    def conflict_handler(conflicts):
+        # Return False to abort sync, True to continue
+        print(f"Conflicts detected: {len(conflicts)}")
+        return False  # Abort on conflicts
+
+    file.sync(bv, conflict_handler)
+
+    print("Synced to server")
+    print(f"Snapshots: {[s.id for s in file.snapshots]}")
+    ```
+  </Step>
+</Steps>
+
+## Handling Merge Conflicts
+
+Resolve conflicts when multiple users edit the same file.
+
+```python
+from binaryninja.collaboration import MergeConflict
+
+def advanced_conflict_handler(conflicts):
+    """
+    Handle merge conflicts during sync
+
+    Args:
+        conflicts: List of MergeConflict objects
+
+    Returns:
+        True to apply auto-merge, False to abort
+    """
+    if not conflicts:
+        return True
+
+    print(f"\nMerge conflicts detected: {len(conflicts)}")
+
+    for i, conflict in enumerate(conflicts):
+        print(f"\nConflict {i + 1}:")
+        print(f"  Type: {conflict.type}")
+        print(f"  Address: {conflict.address:#x}")
+        print(f"  Local: {conflict.local_value}")
+        print(f"  Remote: {conflict.remote_value}")
+
+        # Decide how to handle
+        if conflict.type == "function_name":
+            # Keep local name
+            conflict.resolution = "local"
+        elif conflict.type == "comment":
+            # Merge comments
+            conflict.resolution = "merge"
+        else:
+            # Use remote version
+            conflict.resolution = "remote"
+
+    # Apply resolutions
+    return True
+
+# Use custom conflict handler
+file.sync(bv, advanced_conflict_handler)
+```
+
+## Snapshots
+
+Work with point-in-time snapshots of analysis.
+
+```python
+# List snapshots
+for snapshot in file.snapshots:
+    print(f"Snapshot {snapshot.id}")
+    print(f"  Created: {snapshot.created}")
+    print(f"  Author: {snapshot.author}")
+    print(f"  Name: {snapshot.name}")
+
+# Get specific snapshot
+snapshot = file.snapshots[0]
+
+# Revert to snapshot
+file.revert_to_snapshot(snapshot)
+print(f"Reverted to snapshot {snapshot.id}")
+
+# Compare snapshots
+snapshot1 = file.snapshots[0]
+snapshot2 = file.snapshots[1]
+
+differences = snapshot1.compare(snapshot2)
+for diff in differences:
+    print(f"{diff.type} at {diff.address:#x}")
+```
+
+## Team Collaboration Workflow
+
+Complete example of team collaboration workflow.
+
+```python
+import platform
+import shutil
+from pathlib import Path
+import binaryninja
+import binaryninja.enterprise as enterprise
+import binaryninja.collaboration as collaboration
+
+def team_workflow():
+    """Example team collaboration workflow"""
+
+    with enterprise.LicenseCheckout():
+        # Connect to remote
+        remote = collaboration.enterprise_remote()
+        if not remote:
+            return
+
+        if not remote.is_connected:
+            remote.connect()
+
+        # Create project
+        project = remote.create_project(
+            "Team Analysis",
+            "Collaborative reverse engineering"
+        )
+        print(f"Created project {project.name}")
+
+        # Upload file
+        test_file = "/bin/ls" if platform.system() != "Windows" else "C:\\Windows\\System32\\notepad.exe"
+        file = project.upload_new_file(test_file)
+        print(f"Created file {project.name}/{file.name}")
+
+        project_dir = Path(file.default_path).parent
+
+        try:
+            # Initial snapshot list
+            print(f"Snapshots: {[snapshot.id for snapshot in file.snapshots]}")
+
+            # Analyst 1: Make changes
+            with binaryninja.load(file.default_path) as bv:
+                # Verify collaboration
+                assert collaboration.RemoteFile.get_for_bv(bv) == file
+                assert bv.entry_function is not None
+
+                # Rename entry function
+                print(f"Setting entry function at {bv.entry_function.start:#x} name")
+                bv.entry_function.name = "entry_function"
+
+                # Save snapshot
+                bv.file.save_auto_snapshot()
+
+                # Sync to server
+                file.sync(bv, lambda conflicts: False)
+                print(f"Snapshots: {[snapshot.id for snapshot in file.snapshots]}")
+
+            # Analyst 2: Download and verify changes
+            Path(file.default_path).unlink()
+            print(f"Redownloading {project.name}/{file.name}...")
+            file.download()
+
+            with binaryninja.load(file.core_file) as bv:
+                assert bv.entry_function is not None
+                print(f"Entry function name: {bv.entry_function.name}")
+                assert bv.entry_function.name == "entry_function"
+
+        finally:
+            # Clean up
+            if file is not None:
+                project.delete_file(file)
+            if project.is_open:
+                project.core_project.close()
+            remote.delete_project(project)
+            if project_dir is not None:
+                shutil.rmtree(project_dir)
+
+if __name__ == "__main__":
+    team_workflow()
+```
+
+Source: `~/workspace/source/python/collaboration/examples/sync_test.py:1`
+
+## Command Line Tool
+
+Manage collaboration from the command line.
+
+```python
+import argparse
+import binaryninja.collaboration as collaboration
+from binaryninja.collaboration import Remote, RemoteProject, RemoteFile
+
+def main():
+    parser = argparse.ArgumentParser()
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    # Remote commands
+    remote_parser = subparsers.add_parser("remote")
+    remote_sub = remote_parser.add_subparsers(dest="remote_command", required=True)
+
+    remote_add = remote_sub.add_parser("add")
+    remote_add.add_argument("name", type=str)
+    remote_add.add_argument("address", type=str)
+
+    remote_list = remote_sub.add_parser("list")
+
+    # Project commands
+    project_parser = subparsers.add_parser("project")
+    project_sub = project_parser.add_subparsers(dest="project_command", required=True)
+
+    project_create = project_sub.add_parser("create")
+    project_create.add_argument("remote", type=str)
+    project_create.add_argument("name", type=str)
+    project_create.add_argument("description", type=str)
+
+    project_list = project_sub.add_parser("list")
+    project_list.add_argument("remote", type=str)
+
+    args = parser.parse_args()
+
+    if args.command == "remote":
+        if args.remote_command == "add":
+            remote = Remote(args.name, args.address)
+            collaboration.add_known_remote(remote)
+            collaboration.save_remotes()
+            print(f"Added remote: {remote.name}")
+
+        elif args.remote_command == "list":
+            for remote in collaboration.known_remotes():
+                print(f"{remote.name} @ {remote.address}")
+
+    elif args.command == "project":
+        remote = collaboration.get_remote_by_name(args.remote)
+        if not remote:
+            print(f"Unknown remote: {args.remote}")
+            return
+
+        remote.connect()
+
+        if args.project_command == "create":
+            project = remote.create_project(args.name, args.description)
+            print(f"Created: {project.name}")
+
+        elif args.project_command == "list":
+            for project in remote.projects:
+                print(f"{project.name}: {project.description}")
+                print(f"  Files: {len(project.files)}")
+
+if __name__ == "__main__":
+    main()
+```
+
+Partial source: `~/workspace/source/python/collaboration/examples/multitool.py:1`
+
+## Permissions and Access Control
+
+Manage user permissions on projects and files.
+
+```python
+# Check permissions
+if project.is_admin:
+    print("User has admin access")
+
+# Get project permissions
+for permission in project.permissions:
+    print(f"User: {permission.user.username}")
+    print(f"  Level: {permission.level}")  # read, write, admin
+
+# Grant access (admin only)
+if project.is_admin:
+    user = remote.get_user_by_name("analyst2")
+    project.grant_permission(user, level="write")
+
+# Revoke access (admin only)
+if project.is_admin:
+    project.revoke_permission(user)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Binary Analysis" icon="magnifying-glass-chart" href="/guides/binary-analysis">
+    Learn analysis techniques to use in collaborative projects
+  </Card>
+  <Card title="IL Operations" icon="diagram-nested" href="/guides/il-operations">
+    Work with IL for deeper analysis
+  </Card>
+</CardGroup>
+
+## Related Resources
+
+- [Collaboration API Reference](/api/collaboration)
+- [Enterprise API Reference](/api/enterprise)
+- [Remote API Reference](/api/remote)

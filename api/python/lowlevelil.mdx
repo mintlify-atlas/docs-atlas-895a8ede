@@ -1,0 +1,423 @@
+---
+title: Low Level IL API
+description: Work with Binary Ninja's Low Level Intermediate Language
+---
+
+The Low Level IL (LLIL) is Binary Ninja's lowest-level intermediate representation. It provides a platform-independent view of machine code while preserving architectural details.
+
+## Overview
+
+LLIL is the first IL produced during analysis. Key characteristics:
+
+- **Architecture-independent** - Abstract away instruction encoding
+- **Preserves details** - Maintains flags, register splits, etc.
+- **SSA form available** - For data flow analysis
+- **Tree-based** - Instructions form expression trees
+
+### Accessing LLIL
+
+```python
+# From a function
+llil = func.llil
+llil_ssa = func.llil.ssa_form
+
+# Get LLIL at specific address
+llil_instr = func.get_low_level_il_at(0x401000)
+
+# Iterate all instructions
+for instr in llil.instructions:
+    print(f"{instr.address:#x}: {instr}")
+```
+
+## LowLevelILFunction
+
+Represents a function in LLIL.
+
+<ParamField path="source_function" type="Function">
+  The original Function object
+</ParamField>
+
+<ParamField path="ssa_form" type="LowLevelILFunction">
+  SSA form of this IL function
+</ParamField>
+
+<ParamField path="non_ssa_form" type="LowLevelILFunction">
+  Non-SSA form
+</ParamField>
+
+<ParamField path="instructions" type="Generator[LowLevelILInstruction]">
+  All IL instructions in the function
+</ParamField>
+
+<ParamField path="basic_blocks" type="list[LowLevelILBasicBlock]">
+  Basic blocks in the IL function
+</ParamField>
+
+### Iterating LLIL
+
+```python
+# By instruction
+for instr in llil.instructions:
+    print(instr)
+
+# By basic block
+for block in llil:
+    print(f"Block {block.start}-{block.end}")
+    for instr in block:
+        print(f"  {instr}")
+
+# Get instruction by index
+instr = llil[5]  # Get instruction at index 5
+
+# Get instruction for expression index
+expr_idx = 10
+instr = llil.get_instruction(expr_idx)
+```
+
+## LowLevelILInstruction
+
+Base class for all LLIL instructions (3.0 class hierarchy).
+
+### Core Properties
+
+<ParamField path="operation" type="LowLevelILOperation">
+  The operation type (LLIL_SET_REG, LLIL_LOAD, etc.)
+</ParamField>
+
+<ParamField path="address" type="int">
+  Address of the native instruction
+</ParamField>
+
+<ParamField path="size" type="int">
+  Size of the operation in bytes
+</ParamField>
+
+<ParamField path="expr_index" type="int">
+  Index of this expression in the IL
+</ParamField>
+
+<ParamField path="instr_index" type="Optional[int]">
+  Index of the instruction (vs expression)
+</ParamField>
+
+<ParamField path="function" type="LowLevelILFunction">
+  The IL function containing this instruction
+</ParamField>
+
+### Common Operations
+
+<Tip>
+In Binary Ninja 3.0, use `isinstance()` with instruction hierarchy classes to check instruction types.
+</Tip>
+
+```python
+from binaryninja.commonil import (
+    Constant, Load, Store, BinaryOperation,
+    Call, Return, Terminal
+)
+
+for instr in llil.instructions:
+    # Check using class hierarchy
+    if isinstance(instr, Constant):
+        print(f"Constant: {instr.value}")
+    
+    elif isinstance(instr, Load):
+        print(f"Load from {instr.src}")
+    
+    elif isinstance(instr, Store):
+        print(f"Store to {instr.dest}")
+    
+    elif isinstance(instr, BinaryOperation):
+        print(f"Binary op: {instr.left} {instr.operation} {instr.right}")
+    
+    elif isinstance(instr, Call):
+        print(f"Call to {instr.dest}")
+    
+    elif isinstance(instr, Return):
+        print("Return")
+```
+
+### Register Operations
+
+```python
+# SET_REG: dest = src
+if instr.operation == LowLevelILOperation.LLIL_SET_REG:
+    dest_reg = instr.dest  # ILRegister
+    src_expr = instr.src   # Expression
+    print(f"{dest_reg.name} = {src_expr}")
+
+# REG: read register value
+if instr.operation == LowLevelILOperation.LLIL_REG:
+    reg = instr.src  # ILRegister
+    print(f"Read {reg.name}")
+
+# SET_REG_SPLIT: combine two registers
+if instr.operation == LowLevelILOperation.LLIL_SET_REG_SPLIT:
+    hi_reg = instr.hi
+    lo_reg = instr.lo
+    src_expr = instr.src
+    print(f"{hi_reg.name}:{lo_reg.name} = {src_expr}")
+```
+
+### Memory Operations
+
+```python
+# LOAD: read from memory
+if instr.operation == LowLevelILOperation.LLIL_LOAD:
+    addr_expr = instr.src
+    size = instr.size
+    print(f"Load {size} bytes from {addr_expr}")
+
+# STORE: write to memory  
+if instr.operation == LowLevelILOperation.LLIL_STORE:
+    dest_expr = instr.dest
+    src_expr = instr.src
+    size = instr.size
+    print(f"Store {size} bytes to {dest_expr}")
+```
+
+### Arithmetic Operations
+
+```python
+# ADD, SUB, MUL, etc.
+from binaryninja.enums import LowLevelILOperation
+
+if instr.operation == LowLevelILOperation.LLIL_ADD:
+    left = instr.left
+    right = instr.right
+    print(f"{left} + {right}")
+
+# Floating point operations
+if instr.operation == LowLevelILOperation.LLIL_FADD:
+    print(f"{instr.left} +. {instr.right}")
+```
+
+### Control Flow
+
+```python
+# CALL
+if instr.operation == LowLevelILOperation.LLIL_CALL:
+    dest = instr.dest
+    print(f"Call {dest}")
+    
+    # Get MLIL for call
+    if instr.mlil:
+        print(f"MLIL: {instr.mlil}")
+
+# JUMP (unconditional)
+if instr.operation == LowLevelILOperation.LLIL_JUMP:
+    dest = instr.dest
+    print(f"Jump to {dest}")
+
+# IF (conditional)
+if instr.operation == LowLevelILOperation.LLIL_IF:
+    condition = instr.condition
+    true_target = instr.true
+    false_target = instr.false
+    print(f"If {condition} goto {true_target} else {false_target}")
+
+# RET (return)
+if instr.operation == LowLevelILOperation.LLIL_RET:
+    dest = instr.dest
+    print(f"Return to {dest}")
+```
+
+## ILRegister, ILFlag, ILIntrinsic
+
+LLIL uses special wrapper classes for architecture elements:
+
+### ILRegister
+
+```python
+reg = instr.dest  # ILRegister
+
+print(f"Name: {reg.name}")
+print(f"Index: {reg.index}")
+print(f"Size: {reg.info.size}")
+print(f"Is temp: {reg.temp}")
+```
+
+### ILFlag
+
+```python
+# Flag operations
+if instr.operation == LowLevelILOperation.LLIL_SET_FLAG:
+    flag = instr.dest  # ILFlag
+    print(f"Set flag {flag.name}")
+
+# Flag conditions
+if instr.operation == LowLevelILOperation.LLIL_FLAG_COND:
+    cond = instr.condition  # LowLevelILFlagCondition
+    print(f"Condition: {cond}")
+```
+
+### ILIntrinsic
+
+```python
+# Architecture intrinsics
+if instr.operation == LowLevelILOperation.LLIL_INTRINSIC:
+    intrinsic = instr.intrinsic  # ILIntrinsic
+    params = instr.param
+    outputs = instr.output
+    
+    print(f"Intrinsic: {intrinsic.name}")
+    print(f"Inputs: {intrinsic.inputs}")
+    print(f"Outputs: {intrinsic.outputs}")
+```
+
+## SSA Form
+
+SSA (Static Single Assignment) form is useful for data flow analysis:
+
+```python
+# Get SSA form
+llil_ssa = llil.ssa_form
+
+# Iterate SSA instructions
+for instr in llil_ssa.instructions:
+    print(instr)
+
+# SSA registers have version numbers
+if instr.operation == LowLevelILOperation.LLIL_SET_REG_SSA:
+    dest_ssa = instr.dest  # SSARegister
+    print(f"{dest_ssa.reg.name}#{dest_ssa.version} = {instr.src}")
+
+# Get definition site
+if instr.operation == LowLevelILOperation.LLIL_REG_SSA:
+    reg_ssa = instr.src
+    def_instr = llil_ssa.get_ssa_reg_definition(reg_ssa)
+    print(f"Defined at: {def_instr}")
+
+# Get use sites
+uses = llil_ssa.get_ssa_reg_uses(reg_ssa)
+for use in uses:
+    print(f"Used at: {use}")
+```
+
+### SSA Register Class
+
+```python
+# SSARegister
+ssa_reg = instr.dest
+print(f"Register: {ssa_reg.reg.name}")
+print(f"Version: {ssa_reg.version}")
+```
+
+## Lifted IL
+
+Some architectures have a "lifted" IL form:
+
+```python
+# Get lifted IL (if available)
+lifted = func.lifted_il
+
+if lifted:
+    for instr in lifted.instructions:
+        print(instr)
+```
+
+## Visiting Instructions
+
+Traverse expression trees:
+
+```python
+def visit_callback(name, operand, operand_type, parent):
+    print(f"  {name}: {operand}")
+    return True  # Continue visiting
+
+# Visit all operands
+for instr in llil.instructions:
+    print(f"Instruction: {instr}")
+    instr.visit(visit_callback)
+```
+
+## Example: Find Buffer Operations
+
+```python
+def find_buffer_operations(func):
+    """Find operations on stack buffers."""
+    results = []
+    
+    # Get stack variables
+    stack_vars = [v for v in func.vars 
+                  if v.source_type == VariableSourceType.StackVariableSourceType]
+    
+    for block in func.llil:
+        for instr in block:
+            # Check loads
+            if isinstance(instr, Load):
+                # Check if loading from stack variable
+                # (simplified - actual check is more complex)
+                results.append({
+                    'type': 'load',
+                    'address': instr.address,
+                    'instr': str(instr)
+                })
+            
+            # Check stores
+            elif isinstance(instr, Store):
+                results.append({
+                    'type': 'store',
+                    'address': instr.address,
+                    'instr': str(instr)
+                })
+    
+    return results
+
+# Usage
+for op in find_buffer_operations(func):
+    print(f"{op['address']:#x}: {op['type']} - {op['instr']}")
+```
+
+## Example: Constant Propagation
+
+```python
+def find_constants(llil_func):
+    """Find all constant values used."""
+    from binaryninja.commonil import Constant
+    
+    constants = set()
+    
+    for instr in llil_func.instructions:
+        # Recursively find constants
+        for operand in instr.prefix_operands:
+            if isinstance(operand, Constant):
+                constants.add(operand.value)
+    
+    return sorted(constants)
+
+# Usage
+for const in find_constants(func.llil):
+    print(f"Constant: {const:#x}")
+```
+
+## Instruction Hierarchy (3.0)
+
+Binary Ninja 3.0 provides abstract base classes:
+
+```python
+from binaryninja.commonil import (
+    Constant,       # Constant values
+    BinaryOperation,  # Binary arithmetic/logic
+    UnaryOperation,   # Unary operations  
+    Load,            # Memory loads
+    Store,           # Memory stores
+    Call,            # Function calls
+    Return,          # Returns
+    Terminal,        # Terminal instructions
+    ControlFlow,     # Control flow changes
+    SSA,             # SSA instructions
+    Phi,             # Phi nodes
+)
+
+# Visualize hierarchy
+from binaryninja.lowlevelil import LowLevelILInstruction
+LowLevelILInstruction.show_llil_hierarchy()
+```
+
+## See Also
+
+- [Medium Level IL](/api/python/mediumlevelil) - Higher-level IL
+- [High Level IL](/api/python/highlevelil) - Decompiler output
+- [Function API](/api/python/function) - Function analysis
+- [Architecture API](/api/python/architecture) - CPU architectures

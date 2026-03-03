@@ -1,0 +1,409 @@
+---
+title: Binary view plugins
+description: Create custom binary format loaders
+---
+
+Binary view plugins allow you to add support for new binary file formats to Binary Ninja. They parse headers, create segments, and set up the binary for analysis.
+
+## When to create a binary view plugin
+
+Create a binary view plugin when you need to:
+- Load custom or proprietary binary formats
+- Parse firmware images with specific structures
+- Handle containers with multiple embedded binaries
+- Create specialized views of existing formats
+
+<Note>
+  Binary Ninja includes built-in loaders for ELF, PE, Mach-O, and other common formats.
+</Note>
+
+## Binary view hierarchy
+
+Binary views form a hierarchy:
+
+```
+Raw View (raw bytes)
+  └─ Format View (ELF, PE, Mach-O, etc.)
+      └─ Mapped View (memory mapping)
+```
+
+Your plugin typically creates a **Format View** that sits between the raw view and analysis.
+
+## Creating a binary view
+
+A complete binary view plugin must:
+
+1. Validate the file format
+2. Parse headers and structures
+3. Define segments and sections
+4. Set the architecture and platform
+5. Add entry points
+
+## Example: Nintendo DS ROM loader
+
+Here's a real binary view plugin that loads Nintendo DS ROM files:
+
+```python nds_loader.py
+from binaryninja import BinaryView, Architecture
+from binaryninja.enums import SegmentFlag
+from binaryninja.log import log_error
+import struct
+import traceback
+
+class DSView(BinaryView):
+    name = "NDS"
+    long_name = "Nintendo DS ROM"
+
+    def __init__(self, data):
+        BinaryView.__init__(self, file_metadata=data.file, parent_view=data)
+        self.raw = data
+
+    @classmethod
+    def is_valid_for_data(cls, data):
+        """Validate this is a Nintendo DS ROM"""
+        hdr = data.read(0, 0x160)
+        if len(hdr) < 0x160:
+            return False
+
+        # Validate CRC16 checksums
+        header_crc = struct.unpack("<H", hdr[0x15e:0x160])[0]
+        logo_crc = struct.unpack("<H", hdr[0x15c:0x15e])[0]
+
+        if header_crc != crc16(hdr[0:0x15e]):
+            return False
+        if logo_crc != crc16(hdr[0xc0:0x15c]):
+            return False
+
+        return True
+
+    def init(self):
+        """Initialize the view"""
+        try:
+            # Set architecture
+            self.platform = Architecture["armv7"].standalone_platform
+
+            # Read header
+            hdr = self.raw.read(0, 0x160)
+
+            # Parse ARM9 section
+            arm9_offset = struct.unpack("<L", hdr[0x20:0x24])[0]
+            arm9_entry = struct.unpack("<L", hdr[0x24:0x28])[0]
+            arm9_load_addr = struct.unpack("<L", hdr[0x28:0x2C])[0]
+            arm9_size = struct.unpack("<L", hdr[0x2C:0x30])[0]
+
+            # Add ARM9 segment
+            self.add_auto_segment(
+                arm9_load_addr,  # Virtual address
+                arm9_size,       # Virtual size
+                arm9_offset,     # File offset
+                arm9_size,       # File size
+                SegmentFlag.SegmentReadable | SegmentFlag.SegmentExecutable
+            )
+
+            # Add entry point
+            self.add_entry_point(arm9_entry)
+
+            return True
+        except:
+            log_error(traceback.format_exc())
+            return False
+
+    def perform_is_executable(self):
+        return True
+
+    def perform_get_entry_point(self):
+        hdr = self.raw.read(0, 0x160)
+        return struct.unpack("<L", hdr[0x24:0x28])[0]
+
+# Register the view
+DSView.register()
+```
+
+From [`python/examples/nds.py`](https://github.com/Vector35/binaryninja-api/blob/dev/python/examples/nds.py)
+
+<Info>
+  This plugin creates separate views for ARM9 and ARM7 processors in the DS ROM.
+</Info>
+
+## Key methods to implement
+
+### `is_valid_for_data(cls, data)`
+
+Validates whether this view can handle the file:
+
+```python
+@classmethod
+def is_valid_for_data(cls, data):
+    """Check magic number or file signature"""
+    magic = data.read(0, 4)
+    return magic == b'\x7fELF'  # Example: ELF magic
+```
+
+<Warning>
+  This method must be **fast** - it's called for every file. Avoid expensive parsing.
+</Warning>
+
+### `init(self)`
+
+Initializes the view by parsing the file:
+
+```python
+def init(self):
+    try:
+        # 1. Parse headers
+        header = self.parse_header()
+
+        # 2. Set architecture and platform
+        self.platform = Architecture[header.arch].standalone_platform
+
+        # 3. Create segments
+        for segment in header.segments:
+            self.add_auto_segment(
+                segment.vaddr,
+                segment.vsize,
+                segment.offset,
+                segment.size,
+                segment.flags
+            )
+
+        # 4. Create sections
+        for section in header.sections:
+            self.add_auto_section(
+                section.name,
+                section.start,
+                section.length,
+                section.semantics
+            )
+
+        # 5. Add entry point
+        self.add_entry_point(header.entry)
+
+        # 6. Define symbols
+        for sym in header.symbols:
+            self.define_auto_symbol(Symbol(
+                sym.type,
+                sym.address,
+                sym.name
+            ))
+
+        return True
+    except Exception as e:
+        log_error(f"Failed to initialize view: {e}")
+        return False
+```
+
+### Optional methods
+
+<AccordionGroup>
+  <Accordion title="perform_is_executable()">
+    Indicates if the file is executable:
+
+    ```python
+    def perform_is_executable(self):
+        return True
+    ```
+  </Accordion>
+
+  <Accordion title="perform_get_entry_point()">
+    Returns the entry point address:
+
+    ```python
+    def perform_get_entry_point(self):
+        return self.entry_point
+    ```
+  </Accordion>
+
+  <Accordion title="perform_is_relocatable()">
+    Indicates if the binary supports relocation:
+
+    ```python
+    def perform_is_relocatable(self):
+        return True  # For PIE/PIC binaries
+    ```
+  </Accordion>
+
+  <Accordion title="perform_get_default_endianness()">
+    Returns the binary's endianness:
+
+    ```python
+    def perform_get_default_endianness(self):
+        return Endianness.LittleEndian
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Creating segments and sections
+
+### Segments
+
+Segments define memory regions:
+
+```python
+from binaryninja.enums import SegmentFlag
+
+# Read-only code segment
+self.add_auto_segment(
+    0x1000,      # Virtual address
+    0x5000,      # Virtual size
+    0x200,       # File offset
+    0x5000,      # File size
+    SegmentFlag.SegmentReadable | SegmentFlag.SegmentExecutable
+)
+
+# Read-write data segment
+self.add_auto_segment(
+    0x6000,
+    0x2000,
+    0x5200,
+    0x2000,
+    SegmentFlag.SegmentReadable | SegmentFlag.SegmentWritable
+)
+```
+
+### Sections
+
+Sections provide semantic information:
+
+```python
+from binaryninja.enums import SectionSemantics
+
+self.add_auto_section(
+    ".text",                          # Name
+    0x1000,                           # Start address
+    0x5000,                           # Length
+    SectionSemantics.ReadOnlyCodeSectionSemantics
+)
+
+self.add_auto_section(
+    ".data",
+    0x6000,
+    0x2000,
+    SectionSemantics.ReadWriteDataSectionSemantics
+)
+```
+
+## Multi-view binaries
+
+Some formats contain multiple distinct binaries (like Nintendo DS with ARM9/ARM7). Create separate views:
+
+```python
+class DSArm9View(BinaryView):
+    name = "NDS_ARM9"
+    long_name = "Nintendo DS ARM9"
+
+    # ... implementation for ARM9
+
+class DSArm7View(BinaryView):
+    name = "NDS_ARM7"
+    long_name = "Nintendo DS ARM7"
+
+    # ... implementation for ARM7
+
+# Register both views
+DSArm9View.register()
+DSArm7View.register()
+```
+
+<Note>
+  Users can switch between views using **View → Select View** in the UI.
+</Note>
+
+## Handling relocations
+
+For relocatable binaries (PIE, shared libraries):
+
+```python
+from binaryninja import Relocation
+
+def init(self):
+    # ... parse relocations from file
+
+    for reloc in relocations:
+        self.add_relocation(
+            Architecture[self.arch],
+            Relocation(
+                reloc.address,
+                reloc.type,
+                reloc.target,
+                reloc.addend
+            )
+        )
+```
+
+## Setting up imports and exports
+
+```python
+# Define imported functions
+for import_entry in imports:
+    self.define_auto_symbol(Symbol(
+        SymbolType.ImportedFunctionSymbol,
+        import_entry.address,
+        import_entry.name
+    ))
+
+# Define exported functions
+for export_entry in exports:
+    self.define_auto_symbol(Symbol(
+        SymbolType.FunctionSymbol,
+        export_entry.address,
+        export_entry.name
+    ))
+```
+
+## Type information
+
+For formats with embedded type information:
+
+```python
+from binaryninja import Type
+
+# Define structures
+struct_type = Type.structure_type(
+    StructureBuilder.create([
+        (Type.int(4), "field1"),
+        (Type.pointer(self.arch, Type.char()), "field2")
+    ])
+)
+
+self.define_user_type("MyStruct", struct_type)
+```
+
+## Complete example: NES ROM loader
+
+The NES ROM loader is a complete example including architecture and format:
+
+- **Format**: [`python/examples/nes.py`](https://github.com/Vector35/binaryninja-api/blob/dev/python/examples/nes.py)
+- **Architecture**: 6502 CPU implementation
+- **IL Lifting**: Complete LLIL lifting
+
+## Testing your binary view
+
+```python
+from binaryninja import BinaryViewType
+
+# Test loading
+bv = BinaryViewType['MyFormat'].open('test.bin')
+
+print(f"Architecture: {bv.arch}")
+print(f"Platform: {bv.platform}")
+print(f"Entry point: {hex(bv.entry_point)}")
+
+print("\nSegments:")
+for segment in bv.segments:
+    print(f"  {hex(segment.start)}-{hex(segment.end)}: {segment.flags}")
+
+print("\nSections:")
+for section in bv.sections:
+    print(f"  {section.name}: {hex(section.start)}")
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture plugins" href="/plugins/architecture-plugins">
+    Add CPU architecture support
+  </Card>
+  <Card title="UI plugins" href="/plugins/ui-plugins">
+    Extend the Binary Ninja interface
+  </Card>
+</CardGroup>

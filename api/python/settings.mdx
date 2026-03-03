@@ -1,0 +1,473 @@
+---
+title: Settings API
+description: Manage Binary Ninja settings and configuration
+---
+
+The `Settings` class provides a hierarchical configuration system for Binary Ninja, allowing you to define and access settings at multiple scopes.
+
+## Overview
+
+Binary Ninja's settings system provides:
+
+- **Hierarchical scopes** - Default, User, Project, and Resource levels
+- **Type-safe values** - Boolean, number, string, and array settings
+- **Plugin integration** - Register custom settings for plugins
+- **Persistent storage** - Automatic saving to JSON files
+- **UI integration** - Settings appear in Binary Ninja UI
+
+### Settings Scopes
+
+Settings can be defined at multiple levels:
+
+| Scope | Priority | Storage | Use Case |
+|-------|----------|---------|----------|
+| Default | Lowest | Schema | Built-in defaults |
+| User | Medium | `~/.binaryninja/settings.json` | User preferences |
+| Project | High | `<project>/settings.json` | Project-specific |
+| Resource | Highest | BNDB file | Per-binary settings |
+
+## Settings Class
+
+### Creating Settings
+
+```python
+from binaryninja import Settings
+
+# Get default settings instance
+settings = Settings()
+
+# Create custom settings schema
+my_settings = Settings('my-plugin')
+```
+
+### Reading Settings
+
+```python
+# Boolean setting
+enabled = settings.get_bool('analysis.linearSweep.autorun')
+
+# Integer setting
+max_depth = settings.get_integer('analysis.limits.maxFunctionSize')
+
+# String setting
+arch_name = settings.get_string('arch')
+
+# String list
+paths = settings.get_string_list('analysis.customPaths')
+
+# JSON (for complex settings)
+complex_data = settings.get_json('myPlugin.complexData')
+```
+
+<ParamField path="get_bool" type="(key: str, view: Optional[BinaryView] = None) -> bool">
+  Get a boolean setting value
+  
+  <Expandable title="Parameters">
+    <ResponseField name="key" type="str" required>
+      Setting key (e.g., "analysis.linearSweep.autorun")
+    </ResponseField>
+    <ResponseField name="view" type="BinaryView">
+      BinaryView for resource-scoped settings
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+<ParamField path="get_integer" type="(key: str, view: Optional[BinaryView] = None) -> int">
+  Get an integer setting value
+</ParamField>
+
+<ParamField path="get_string" type="(key: str, view: Optional[BinaryView] = None) -> str">
+  Get a string setting value
+</ParamField>
+
+<ParamField path="get_string_list" type="(key: str, view: Optional[BinaryView] = None) -> list[str]">
+  Get a string list setting value
+</ParamField>
+
+### Writing Settings
+
+```python
+from binaryninja.enums import SettingsScope
+
+# Set at user scope (default)
+settings.set_bool('analysis.linearSweep.autorun', True)
+
+# Set at specific scope
+settings.set_integer(
+    'analysis.limits.maxFunctionSize',
+    65536,
+    scope=SettingsScope.SettingsUserScope
+)
+
+# Set for specific binary (resource scope)
+settings.set_string('myPlugin.option', 'value', view=bv)
+
+# Set string list
+settings.set_string_list('analysis.customPaths', ['/path1', '/path2'])
+
+# Set complex JSON
+import json
+data = {'key': 'value', 'nested': {'data': [1, 2, 3]}}
+settings.set_json('myPlugin.data', json.dumps(data))
+```
+
+## Registering Settings
+
+### Register a Group
+
+```python
+# Register settings group
+settings.register_group('myPlugin', 'My Plugin')
+```
+
+<ParamField path="register_group" type="(group: str, title: str) -> bool">
+  Register a settings group
+  
+  <Expandable title="Parameters">
+    <ResponseField name="group" type="str" required>
+      Unique group identifier
+    </ResponseField>
+    <ResponseField name="title" type="str" required>
+      User-friendly group title
+    </ResponseField>
+  </Expandable>
+</ParamField>
+
+### Register a Setting
+
+```python
+import json
+
+# Boolean setting
+properties = {
+    "title": "Enable Feature",
+    "description": "Enable my plugin's feature",
+    "type": "boolean",
+    "default": True
+}
+settings.register_setting(
+    'myPlugin.enableFeature',
+    json.dumps(properties)
+)
+
+# Number setting with range
+properties = {
+    "title": "Max Iterations",
+    "description": "Maximum number of iterations",
+    "type": "number",
+    "default": 100,
+    "minValue": 1,
+    "maxValue": 1000
+}
+settings.register_setting(
+    'myPlugin.maxIterations',
+    json.dumps(properties)
+)
+
+# String setting with enum
+properties = {
+    "title": "Output Format",
+    "description": "Output format for results",
+    "type": "string",
+    "default": "json",
+    "enum": ["json", "xml", "csv"],
+    "enumDescriptions": [
+        "JSON format",
+        "XML format",
+        "CSV format"
+    ]
+}
+settings.register_setting(
+    'myPlugin.outputFormat',
+    json.dumps(properties)
+)
+
+# Array setting
+properties = {
+    "title": "Paths",
+    "description": "Custom search paths",
+    "type": "array",
+    "default": [],
+    "sorted": True
+}
+settings.register_setting(
+    'myPlugin.paths',
+    json.dumps(properties)
+)
+```
+
+### Setting Properties
+
+Available properties for settings:
+
+<ParamField path="title" type="string" required>
+  Concise setting title (shown in UI)
+</ParamField>
+
+<ParamField path="description" type="string" required>
+  Detailed description
+</ParamField>
+
+<ParamField path="type" type="string" required>
+  Setting type: "boolean", "number", "string", or "array"
+</ParamField>
+
+<ParamField path="default" type="any">
+  Default value for the setting
+</ParamField>
+
+<ParamField path="minValue" type="number">
+  Minimum value (for number types)
+</ParamField>
+
+<ParamField path="maxValue" type="number">
+  Maximum value (for number types)
+</ParamField>
+
+<ParamField path="enum" type="array[string]">
+  Allowed values (for string types)
+</ParamField>
+
+<ParamField path="enumDescriptions" type="array[string]">
+  Descriptions for enum values
+</ParamField>
+
+<ParamField path="ignore" type="array[string]">
+  Scopes to ignore: ["SettingsUserScope", "SettingsProjectScope", "SettingsResourceScope"]
+</ParamField>
+
+<ParamField path="readOnly" type="boolean">
+  Whether setting is read-only in UI
+</ParamField>
+
+<ParamField path="optional" type="boolean">
+  Whether setting can be null
+</ParamField>
+
+<ParamField path="requiresRestart" type="boolean">
+  Whether changing requires restart
+</ParamField>
+
+## Settings Scopes
+
+```python
+from binaryninja.enums import SettingsScope
+
+# Available scopes
+SettingsScope.SettingsDefaultScope    # Built-in defaults
+SettingsScope.SettingsUserScope       # User preferences
+SettingsScope.SettingsProjectScope    # Project settings
+SettingsScope.SettingsResourceScope   # Per-binary (BNDB)
+SettingsScope.SettingsAutoScope       # Automatic selection
+
+# Set at specific scope
+settings.set_bool(
+    'myPlugin.enabled',
+    True,
+    scope=SettingsScope.SettingsUserScope
+)
+
+# Get from specific scope
+value = settings.get_bool(
+    'myPlugin.enabled',
+    scope=SettingsScope.SettingsUserScope
+)
+```
+
+## Loading and Saving
+
+```python
+# Load settings from file
+settings.load_settings_file(
+    '/path/to/settings.json',
+    scope=SettingsScope.SettingsUserScope
+)
+
+# Reset settings (don't load from file)
+settings.load_settings_file(
+    '',  # Empty path
+    scope=SettingsScope.SettingsUserScope
+)
+
+# Serialize settings
+settings_json = settings.serialize_schema()
+
+# Deserialize schema
+settings.deserialize_schema(settings_json)
+```
+
+## Resource ID
+
+For resource-scoped settings:
+
+```python
+# Set resource ID (for BinaryView context)
+settings.set_resource_id(bv.view_type)
+
+# Then resource-scoped settings apply to this view type
+settings.set_bool(
+    'myPlugin.enabled',
+    True,
+    scope=SettingsScope.SettingsResourceScope,
+    view=bv
+)
+```
+
+## Querying Settings
+
+```python
+# Check if setting exists
+if settings.contains('myPlugin.enableFeature'):
+    value = settings.get_bool('myPlugin.enableFeature')
+
+# Get all setting keys
+for key in settings.keys():
+    print(key)
+
+# Check if settings empty
+if settings.is_empty():
+    print("No settings defined")
+
+# Query property value
+title = settings.query_property_string('myPlugin.enabled', 'title')
+description = settings.query_property_string('myPlugin.enabled', 'description')
+```
+
+## Example: Plugin Settings
+
+```python
+class MyPluginSettings:
+    """Manage settings for my plugin."""
+    
+    def __init__(self):
+        self.settings = Settings()
+        self._register_settings()
+    
+    def _register_settings(self):
+        # Register group
+        self.settings.register_group('myPlugin', 'My Plugin')
+        
+        # Analysis settings
+        self.settings.register_setting(
+            'myPlugin.enableDeepAnalysis',
+            json.dumps({
+                'title': 'Enable Deep Analysis',
+                'description': 'Perform deeper analysis (slower)',
+                'type': 'boolean',
+                'default': False
+            })
+        )
+        
+        self.settings.register_setting(
+            'myPlugin.maxDepth',
+            json.dumps({
+                'title': 'Maximum Depth',
+                'description': 'Maximum recursion depth',
+                'type': 'number',
+                'default': 10,
+                'minValue': 1,
+                'maxValue': 100
+            })
+        )
+        
+        # Output settings
+        self.settings.register_setting(
+            'myPlugin.outputPath',
+            json.dumps({
+                'title': 'Output Path',
+                'description': 'Path for output files',
+                'type': 'string',
+                'default': '',
+                'uiSelectionAction': 'directory'
+            })
+        )
+        
+        # UI settings (ignore project/resource scopes)
+        self.settings.register_setting(
+            'myPlugin.showNotifications',
+            json.dumps({
+                'title': 'Show Notifications',
+                'description': 'Show popup notifications',
+                'type': 'boolean',
+                'default': True,
+                'ignore': ['SettingsProjectScope', 'SettingsResourceScope']
+            })
+        )
+    
+    def get_deep_analysis(self, bv=None):
+        return self.settings.get_bool('myPlugin.enableDeepAnalysis', bv)
+    
+    def get_max_depth(self, bv=None):
+        return self.settings.get_integer('myPlugin.maxDepth', bv)
+    
+    def get_output_path(self, bv=None):
+        return self.settings.get_string('myPlugin.outputPath', bv)
+
+# Usage
+plugin_settings = MyPluginSettings()
+
+# Load binary with custom settings
+bv = load('/bin/ls', options={
+    'myPlugin.enableDeepAnalysis': True,
+    'myPlugin.maxDepth': 20
+})
+
+# Get settings
+if plugin_settings.get_deep_analysis(bv):
+    max_depth = plugin_settings.get_max_depth(bv)
+    print(f"Deep analysis enabled with max depth {max_depth}")
+```
+
+## Example: Settings Migration
+
+```python
+def migrate_settings(old_key, new_key):
+    """Migrate settings from old key to new key."""
+    settings = Settings()
+    
+    # Get old value if it exists
+    if settings.contains(old_key):
+        # Try different types
+        try:
+            value = settings.get_bool(old_key)
+            settings.set_bool(new_key, value)
+        except:
+            try:
+                value = settings.get_integer(old_key)
+                settings.set_integer(new_key, value)
+            except:
+                try:
+                    value = settings.get_string(old_key)
+                    settings.set_string(new_key, value)
+                except:
+                    pass
+        
+        print(f"Migrated {old_key} -> {new_key}")
+
+# Usage
+migrate_settings('oldPlugin.option', 'newPlugin.option')
+```
+
+## Common Settings
+
+Frequently used Binary Ninja settings:
+
+```python
+# Analysis settings
+auto_analyze = settings.get_bool('analysis.autorunLinearSweep')
+max_function_size = settings.get_integer('analysis.limits.maxFunctionSize')
+
+# UI settings
+theme = settings.get_string('ui.theme')
+show_addresses = settings.get_bool('ui.view.graph.showAddress')
+
+# Update settings
+settings.set_bool('analysis.autorunLinearSweep', False)
+settings.set_integer('analysis.limits.maxFunctionSize', 100000)
+```
+
+## See Also
+
+- [BinaryView API](/api/python/binaryview) - Binary file operations  
+- [Platform API](/api/python/platform) - Platform configuration
+- [Function API](/api/python/function) - Function analysis

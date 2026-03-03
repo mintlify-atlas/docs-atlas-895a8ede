@@ -1,0 +1,319 @@
+---
+title: 'Binary Analysis Workflows'
+description: 'Learn how to analyze binaries using Binary Ninja API with real-world examples'
+icon: 'magnifying-glass-chart'
+---
+
+## Overview
+
+Binary Ninja provides powerful APIs for automating binary analysis tasks. This guide walks through common analysis workflows with complete working examples from actual Binary Ninja source code.
+
+## Basic Binary Information
+
+Extract essential information about a binary, including architecture, entry point, functions, and strings.
+
+<Steps>
+  <Step title="Load the Binary">
+    Use `binaryninja.load()` to open a binary file. This returns a `BinaryView` object that provides access to all analysis features.
+
+    ```python
+    from binaryninja import load, LogLevel, log_to_stdout
+
+    # Enable info logging to console
+    log_to_stdout(LogLevel.InfoLog)
+
+    # Load the binary with context manager for automatic cleanup
+    with load("/path/to/binary") as bv:
+        # Analysis happens here
+        pass
+    ```
+
+    <Note>
+    Using a context manager (`with` statement) ensures the file is properly closed, preventing memory leaks from circular references between BinaryViews and FileMetadata.
+    </Note>
+  </Step>
+
+  <Step title="Access Binary Properties">
+    The BinaryView provides direct access to key binary properties.
+
+    ```python
+    # Basic properties
+    print(f"Filename: {bv.file.filename}")
+    print(f"Start address: 0x{bv.start:x}")
+    print(f"Entry point: 0x{bv.entry_point:x}")
+    print(f"Architecture: {bv.arch.name}")
+    ```
+  </Step>
+
+  <Step title="Enumerate Functions">
+    Iterate through all functions discovered by Binary Ninja's analysis.
+
+    ```python
+    print("\nFirst 10 Functions:")
+    print("| Start | Name |")
+    print("|------:|:-----|")
+
+    functions = list(bv.functions)
+    for i in range(min(10, len(functions))):
+        func = functions[i]
+        print(f"| 0x{func.start:x} | {func.symbol.full_name} |")
+    ```
+
+    <Note>
+    Functions are accessed via `bv.functions`, which returns an iterator of `Function` objects.
+    </Note>
+  </Step>
+
+  <Step title="Extract Strings">
+    Binary Ninja automatically identifies strings in the binary.
+
+    ```python
+    print("\nFirst 10 Strings:")
+    print("| Start | Length | Value |")
+    print("|------:|-------:|:------|")
+
+    for i in range(min(10, len(bv.strings))):
+        string = bv.strings[i]
+        print(f"| 0x{string.start:x} | {string.length} | {string.value} |")
+    ```
+  </Step>
+</Steps>
+
+### Complete Example
+
+Here's a complete script that generates a markdown report of binary information:
+
+```python ~/workspace/source/python/examples/bin_info.py
+import os
+from binaryninja import load
+
+def get_bininfo(filename):
+    if not (os.path.isfile(filename) and os.access(filename, os.R_OK)):
+        return f"Cannot read {filename}\n"
+
+    bv = load(filename, options={
+        'analysis.mode': 'basic',
+        'analysis.linearSweep.autorun': False
+    })
+
+    contents = f"## {os.path.basename(bv.file.filename)} ##\n"
+    contents += f"- START: 0x{bv.start:x}\n\n"
+    contents += f"- ENTRY: 0x{bv.entry_point:x}\n\n"
+    contents += f"- ARCH: {bv.arch.name}\n\n"
+
+    contents += "### First 10 Functions ###\n"
+    contents += "| Start | Name   |\n"
+    contents += "|------:|:-------|\n"
+    functions = list(bv.functions)
+    for i in range(min(10, len(functions))):
+        contents += f"| 0x{functions[i].start:x} | {functions[i].symbol.full_name} |\n"
+
+    contents += "### First 10 Strings ###\n"
+    contents += "| Start | Length | String |\n"
+    contents += "|------:|-------:|:-------|\n"
+    for i in range(min(10, len(bv.strings))):
+        start = bv.strings[i].start
+        length = bv.strings[i].length
+        string = bv.strings[i].value
+        contents += f"| 0x{start:x} |{length} | {string} |\n"
+
+    bv.file.close()
+    return contents
+
+if __name__ == "__main__":
+    print(get_bininfo("/bin/ls"))
+```
+
+<Warning>
+Always close BinaryView file handles when done to prevent memory leaks. Use context managers or call `bv.file.close()` explicitly.
+</Warning>
+
+## Iterating Instructions
+
+Analyze functions at different levels: machine code, Low Level IL, or higher representations.
+
+<Tabs>
+  <Tab title="Machine Code">
+    ```python
+    from binaryninja import load, log_info
+
+    with load(target) as bv:
+        for func in bv.functions:
+            log_info(repr(func))
+            for block in func:
+                log_info(f"\t{block}")
+                for insn in block:
+                    log_info(f"\t\t{insn}")
+    ```
+
+    This iterates through functions at the disassembly level, showing actual machine instructions.
+  </Tab>
+
+  <Tab title="Low Level IL">
+    ```python
+    from binaryninja import load, log_info
+
+    with load(target) as bv:
+        for func in bv.functions:
+            log_info(repr(func))
+            for block in func.low_level_il:
+                log_info(f"\t{block}")
+                for insn in block:
+                    log_info(f"\t\t{insn}")
+    ```
+
+    Low Level IL provides a normalized representation that's easier to analyze programmatically.
+  </Tab>
+</Tabs>
+
+### Output Example
+
+```
+Function sub_401000:
+    <block: x86_64@0x401000-0x401010>
+        push    rbp
+        mov     rbp, rsp
+        mov     eax, 0x0
+        pop     rbp
+        ret
+```
+
+## Finding System Calls
+
+Identify and extract system call numbers from binaries. This example demonstrates IL operation filtering and value tracking.
+
+<Steps>
+  <Step title="Get System Call Convention">
+    ```python
+    from binaryninja import load
+
+    bv = load(fileName)
+    calling_convention = bv.platform.system_call_convention
+
+    if calling_convention is None:
+        print(f'Error: No syscall convention available for {bv.platform}')
+        return
+
+    # Get the register that holds the syscall number
+    register = calling_convention.int_arg_regs[0]
+    ```
+  </Step>
+
+  <Step title="Filter for SYSCALL Instructions">
+    ```python
+    from itertools import chain
+    from binaryninja.enums import LowLevelILOperation
+
+    for func in bv.functions:
+        # Create generator that finds all SYSCALL operations
+        syscalls = (
+            il for il in chain.from_iterable(func.low_level_il)
+            if il.operation == LowLevelILOperation.LLIL_SYSCALL
+        )
+
+        for il in syscalls:
+            # Process each syscall
+            pass
+    ```
+
+    <Note>
+    Using generators and `chain.from_iterable()` efficiently processes IL instructions across all basic blocks.
+    </Note>
+  </Step>
+
+  <Step title="Extract Syscall Numbers">
+    ```python
+    for il in syscalls:
+        # Get the value of the syscall number register at this instruction
+        value = func.get_reg_value_at(il.address, register).value
+        print(f"System call address: {il.address:#x} - {value:d}")
+    ```
+  </Step>
+</Steps>
+
+### Complete Example
+
+```python ~/workspace/source/python/examples/print_syscalls.py
+from itertools import chain
+from binaryninja import load
+from binaryninja.enums import LowLevelILOperation
+
+def print_syscalls(fileName):
+    """Print Syscall numbers for a provided file"""
+    bv = load(fileName)
+    calling_convention = bv.platform.system_call_convention
+
+    if calling_convention is None:
+        print(f'Error: No syscall convention available for {bv.platform}')
+        return
+
+    register = calling_convention.int_arg_regs[0]
+
+    for func in bv.functions:
+        syscalls = (
+            il for il in chain.from_iterable(func.low_level_il)
+            if il.operation == LowLevelILOperation.LLIL_SYSCALL
+        )
+
+        for il in syscalls:
+            value = func.get_reg_value_at(il.address, register).value
+            print(f"System call address: {il.address:#x} - {value:d}")
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) != 2:
+        print(f'Usage: {sys.argv[0]} <file>')
+    else:
+        print_syscalls(sys.argv[1])
+```
+
+### Output Example
+
+```
+System call address: 0x401234 - 1
+System call address: 0x401567 - 3
+System call address: 0x401890 - 60
+```
+
+## Tracking Register Values
+
+Binary Ninja's value tracking lets you determine register values at specific program points.
+
+```python
+from binaryninja import RegisterValueType
+
+# Get value at a specific address
+value = func.get_reg_value_at(address, "rax", arch)
+
+if value.type == RegisterValueType.ConstantValue:
+    print(f"rax = {value.value:#x}")
+elif value.type == RegisterValueType.UndeterminedValue:
+    # Value cannot be determined statically
+    # Try getting possible values from IL
+    instr = func.low_level_il.get_instruction_start(address, arch)
+    if instr is not None:
+        possible = func.low_level_il[instr].get_possible_reg_values("rax")
+        print(f"rax possible values: {possible}")
+
+# Get value after an instruction executes
+value_after = func.get_reg_value_after(address, "rax", arch)
+```
+
+See the [Data Flow Analysis](/guides/data-flow-analysis) guide for more advanced value tracking techniques.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="IL Operations" icon="code" href="/guides/il-operations">
+    Learn how to work with Binary Ninja's Intermediate Language representations
+  </Card>
+  <Card title="Data Flow Analysis" icon="diagram-project" href="/guides/data-flow-analysis">
+    Track values and analyze data flow through programs
+  </Card>
+</CardGroup>
+
+## Related Resources
+
+- [BinaryView API Reference](/api/binaryview)
+- [Function API Reference](/api/function)
+- [Architecture API Reference](/api/architecture)

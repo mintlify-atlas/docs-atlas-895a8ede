@@ -1,0 +1,500 @@
+---
+title: Function Class
+description: C++ API reference for the Function class - representing and analyzing functions
+---
+
+The `Function` class represents a function in a binary and provides methods for analyzing its properties, control flow, variables, and intermediate language representations.
+
+## Class Declaration
+
+Defined in `binaryninjaapi.h:12713`
+
+```cpp
+namespace BinaryNinja {
+    class Function : public CoreRefCountObject<BNFunction, 
+                                                 BNNewFunctionReference, 
+                                                 BNFreeFunction>
+    {
+    public:
+        Function(BNFunction* func);
+        virtual ~Function();
+
+        // Core properties
+        Ref<BinaryView> GetView() const;
+        Ref<Architecture> GetArchitecture() const;
+        Ref<Platform> GetPlatform() const;
+        uint64_t GetStart() const;
+        Ref<Symbol> GetSymbol() const;
+
+        // Analysis and control flow
+        std::vector<Ref<BasicBlock>> GetBasicBlocks() const;
+        Ref<BasicBlock> GetBasicBlockAtAddress(Architecture* arch, uint64_t addr) const;
+
+        // Type and attributes
+        Ref<Type> GetType() const;
+        bool HasExplicitlyDefinedType() const;
+        Confidence<bool> CanReturn() const;
+        Confidence<bool> IsPure() const;
+
+        // IL representations
+        Ref<LowLevelILFunction> GetLowLevelIL() const;
+        Ref<MediumLevelILFunction> GetMediumLevelIL() const;
+        Ref<HighLevelILFunction> GetHighLevelIL() const;
+
+        // ... many more methods
+    };
+}
+```
+
+## Basic Properties
+
+### Get Function Address
+
+```cpp
+uint64_t GetStart() const;
+```
+
+Returns the starting virtual address of the function.
+
+**Example:**
+```cpp
+Ref<Function> func = bv->GetAnalysisFunction(platform, 0x401000);
+cout << "Function starts at: 0x" << hex << func->GetStart() << endl;
+```
+
+### Get Binary View
+
+```cpp
+Ref<BinaryView> GetView() const;
+```
+
+Returns the BinaryView containing this function.
+
+### Get Architecture
+
+```cpp
+Ref<Architecture> GetArchitecture() const;
+```
+
+Returns the architecture used by this function.
+
+**Example:**
+```cpp
+Ref<Architecture> arch = func->GetArchitecture();
+cout << "Architecture: " << arch->GetName() << endl;
+```
+
+### Get Platform
+
+```cpp
+Ref<Platform> GetPlatform() const;
+```
+
+Returns the platform (OS + architecture) for this function.
+
+## Symbol Information
+
+### Get Symbol
+
+```cpp
+Ref<Symbol> GetSymbol() const;
+```
+
+Returns the symbol associated with this function.
+
+**Example:**
+```cpp
+Ref<Symbol> sym = func->GetSymbol();
+cout << "Function name: " << sym->GetFullName() << endl;
+cout << "Short name: " << sym->GetShortName() << endl;
+```
+
+### Check Export Status
+
+```cpp
+bool IsExported() const;
+```
+
+Returns true if the function's symbol is globally or weakly bound (treated as exported).
+
+## Function Attributes
+
+### Auto-Discovery Status
+
+```cpp
+bool WasAutomaticallyDiscovered() const;
+```
+
+Returns true if the function was automatically discovered by analysis.
+
+### User Annotations
+
+```cpp
+bool HasUserAnnotations() const;
+```
+
+Returns true if the function has user annotations.
+
+### Return Behavior
+
+```cpp
+Confidence<bool> CanReturn() const;
+```
+
+Returns whether this function can return (is not marked `noreturn`).
+
+### Purity
+
+```cpp
+Confidence<bool> IsPure() const;
+```
+
+Returns whether this function is pure (has no observable side effects).
+
+## Type Information
+
+### Get Function Type
+
+```cpp
+Ref<Type> GetType() const;
+```
+
+Returns the type signature of the function.
+
+### Set Function Type
+
+```cpp
+void SetUserType(Ref<Type> type);
+void SetAutoType(Ref<Type> type);
+```
+
+Sets the function's type (user-defined or auto-discovered).
+
+**Example:**
+```cpp
+Ref<Type> funcType = func->GetType();
+if (funcType) {
+    auto params = funcType->GetParameters();
+    cout << "Function has " << params.size() << " parameters" << endl;
+    
+    for (const auto& param : params) {
+        cout << "  Parameter: " << param.name 
+             << " (type: " << param.type->GetString() << ")" << endl;
+    }
+}
+```
+
+### Type Definition Status
+
+```cpp
+bool HasExplicitlyDefinedType() const;
+```
+
+Returns true if the function has an explicitly defined type.
+
+## Basic Blocks and Control Flow
+
+### Get All Basic Blocks
+
+```cpp
+std::vector<Ref<BasicBlock>> GetBasicBlocks() const;
+```
+
+Returns all basic blocks in the function.
+
+**Example:**
+```cpp
+for (auto block : func->GetBasicBlocks()) {
+    cout << "Basic block at 0x" << hex << block->GetStart() << endl;
+    cout << "  Length: " << dec << block->GetLength() << " bytes" << endl;
+    cout << "  Outgoing edges: " << block->GetOutgoingEdges().size() << endl;
+}
+```
+
+### Get Basic Block at Address
+
+```cpp
+Ref<BasicBlock> GetBasicBlockAtAddress(Architecture* arch, uint64_t addr) const;
+```
+
+Returns the basic block containing the specified address.
+
+**Example:**
+```cpp
+Ref<BasicBlock> block = func->GetBasicBlockAtAddress(arch, 0x401234);
+if (block) {
+    cout << "Found block spanning 0x" << hex << block->GetStart()
+         << " to 0x" << block->GetEnd() << endl;
+}
+```
+
+## Intermediate Language Access
+
+### Low-Level IL (LLIL)
+
+```cpp
+Ref<LowLevelILFunction> GetLowLevelIL() const;
+Ref<LowLevelILFunction> GetLowLevelILIfAvailable() const;
+```
+
+Returns the Low-Level IL representation of the function.
+
+**Example:**
+```cpp
+Ref<LowLevelILFunction> llil = func->GetLowLevelIL();
+if (llil) {
+    cout << "LLIL instruction count: " << llil->GetInstructionCount() << endl;
+    
+    for (size_t i = 0; i < llil->GetInstructionCount(); i++) {
+        LowLevelILInstruction instr = llil->GetInstruction(i);
+        cout << "  [" << i << "] " << instr.operation << endl;
+    }
+}
+```
+
+See the [llil_parser example](https://github.com/Vector35/binaryninjaapi/tree/dev/examples/llil_parser) for more details.
+
+### Medium-Level IL (MLIL)
+
+```cpp
+Ref<MediumLevelILFunction> GetMediumLevelIL() const;
+Ref<MediumLevelILFunction> GetMediumLevelILIfAvailable() const;
+```
+
+Returns the Medium-Level IL representation of the function.
+
+**Example:**
+```cpp
+Ref<MediumLevelILFunction> mlil = func->GetMediumLevelIL();
+if (mlil) {
+    cout << "MLIL instruction count: " << mlil->GetInstructionCount() << endl;
+}
+```
+
+See the [mlil_parser example](https://github.com/Vector35/binaryninjaapi/tree/dev/examples/mlil_parser) for more details.
+
+### High-Level IL (HLIL)
+
+```cpp
+Ref<HighLevelILFunction> GetHighLevelIL() const;
+Ref<HighLevelILFunction> GetHighLevelILIfAvailable() const;
+```
+
+Returns the High-Level IL representation of the function.
+
+## Comments
+
+### Get Function Comment
+
+```cpp
+std::string GetComment() const;
+```
+
+Returns the function-level comment.
+
+### Set Function Comment
+
+```cpp
+void SetComment(const std::string& comment);
+```
+
+Sets the function-level comment.
+
+### Address Comments
+
+```cpp
+std::string GetCommentForAddress(uint64_t addr) const;
+void SetCommentForAddress(uint64_t addr, const std::string& comment);
+std::vector<uint64_t> GetCommentedAddresses() const;
+```
+
+Manage comments at specific addresses within the function.
+
+**Example:**
+```cpp
+// Set a comment
+func->SetCommentForAddress(0x401234, "Important check here");
+
+// Get all commented addresses
+for (uint64_t addr : func->GetCommentedAddresses()) {
+    cout << "Comment at 0x" << hex << addr << ": "
+         << func->GetCommentForAddress(addr) << endl;
+}
+```
+
+## Cross-References
+
+### Get Call Sites
+
+```cpp
+std::vector<ReferenceSource> GetCallSites() const;
+```
+
+Returns all locations that call this function.
+
+**Example:**
+```cpp
+for (const auto& callSite : func->GetCallSites()) {
+    cout << "Called from 0x" << hex << callSite.addr << endl;
+}
+```
+
+### Add User Cross-References
+
+```cpp
+void AddUserCodeReference(Architecture* fromArch, uint64_t fromAddr, uint64_t toAddr);
+void RemoveUserCodeReference(Architecture* fromArch, uint64_t fromAddr, uint64_t toAddr);
+```
+
+Add or remove user-defined cross-references.
+
+### Add Type References
+
+```cpp
+void AddUserTypeReference(Architecture* fromArch, uint64_t fromAddr, const QualifiedName& name);
+void RemoveUserTypeReference(Architecture* fromArch, uint64_t fromAddr, const QualifiedName& name);
+```
+
+Add or remove user-defined type cross-references.
+
+### Add Type Field References
+
+```cpp
+void AddUserTypeFieldReference(Architecture* fromArch, uint64_t fromAddr, 
+                               const QualifiedName& name, 
+                               uint64_t offset, 
+                               size_t size = 0);
+void RemoveUserTypeFieldReference(Architecture* fromArch, uint64_t fromAddr, 
+                                  const QualifiedName& name, 
+                                  uint64_t offset, 
+                                  size_t size = 0);
+```
+
+Add or remove references to specific fields in types.
+
+## Variables
+
+### Get Variables
+
+```cpp
+std::vector<Variable> GetVariables() const;
+std::vector<Variable> GetStackVariables() const;
+std::vector<Variable> GetParameterVariables() const;
+```
+
+Returns variables used in the function.
+
+**Example:**
+```cpp
+for (const auto& var : func->GetVariables()) {
+    cout << "Variable: " << func->GetVariableName(var) << endl;
+    cout << "  Type: " << func->GetVariableType(var)->GetString() << endl;
+}
+```
+
+### Variable Names and Types
+
+```cpp
+std::string GetVariableName(const Variable& var);
+void SetVariableName(const Variable& var, const std::string& name);
+
+Ref<Type> GetVariableType(const Variable& var);
+void SetVariableUserType(const Variable& var, Ref<Type> type);
+```
+
+Manage variable names and types.
+
+## Analysis Updates
+
+### Request Analysis
+
+```cpp
+void Reanalyze();
+void RequestAdvancedAnalysisData();
+```
+
+Request reanalysis or advanced analysis of the function.
+
+### Check Update Status
+
+```cpp
+bool NeedsUpdate() const;
+```
+
+Returns true if the function needs to be reanalyzed.
+
+### Mark Recent Use
+
+```cpp
+void MarkRecentUse();
+```
+
+Marks the function as recently used (affects caching behavior).
+
+## Complete Example
+
+Here's a complete example analyzing a function:
+
+```cpp
+#include "binaryninjaapi.h"
+#include <iostream>
+
+using namespace BinaryNinja;
+using namespace std;
+
+int main(int argc, char* argv[]) {
+    SetBundledPluginDirectory(GetBundledPluginDirectory());
+    InitPlugins();
+
+    Ref<BinaryView> bv = BinaryNinja::Load(argv[1]);
+    if (!bv) return -1;
+
+    // Get a function
+    auto funcs = bv->GetAllEntryFunctions();
+    if (funcs.empty()) return -1;
+    
+    Ref<Function> func = funcs[0];
+
+    // Print basic info
+    cout << "Function: " << func->GetSymbol()->GetFullName() << endl;
+    cout << "Address: 0x" << hex << func->GetStart() << endl;
+    cout << "Architecture: " << func->GetArchitecture()->GetName() << endl;
+
+    // Print type info
+    Ref<Type> type = func->GetType();
+    if (type) {
+        cout << "Return type: " << type->GetChildType().GetValue()->GetString() << endl;
+        
+        auto params = type->GetParameters();
+        cout << "Parameters (" << params.size() << "):" << endl;
+        for (const auto& p : params) {
+            cout << "  " << p.name << ": " << p.type->GetString() << endl;
+        }
+    }
+
+    // Print basic blocks
+    cout << "\nBasic blocks (" << func->GetBasicBlocks().size() << "):" << endl;
+    for (auto block : func->GetBasicBlocks()) {
+        cout << "  0x" << hex << block->GetStart() 
+             << " - 0x" << block->GetEnd() 
+             << " (" << dec << block->GetLength() << " bytes)" << endl;
+    }
+
+    // Get MLIL
+    Ref<MediumLevelILFunction> mlil = func->GetMediumLevelIL();
+    if (mlil) {
+        cout << "\nMLIL Instructions: " << mlil->GetInstructionCount() << endl;
+    }
+
+    bv->GetFile()->Close();
+    BNShutdown();
+    return 0;
+}
+```
+
+## See Also
+
+- [BinaryView Class](/api/cpp/binaryview) - Binary file interface
+- [IL Classes](/api/cpp/il) - Intermediate language representations
+- [Architecture Class](/api/cpp/architecture) - CPU architecture support
+- [Type Class](/api/cpp/types) - Type system

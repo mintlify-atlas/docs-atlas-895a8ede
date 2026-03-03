@@ -1,0 +1,577 @@
+---
+title: High Level IL API
+description: Work with Binary Ninja's decompiler High Level Intermediate Language
+---
+
+The High Level IL (HLIL) is Binary Ninja's highest-level intermediate representation, providing a decompiled view of the code with C-like structures.
+
+## Overview
+
+HLIL is the output of Binary Ninja's decompiler:
+
+- **High-level constructs** - if/while/for/switch statements
+- **Abstract Syntax Tree** - Tree-based representation
+- **Type-aware** - Uses recovered type information
+- **Readable** - Close to source code
+- **SSA form available** - For advanced analysis
+
+### Accessing HLIL
+
+```python
+# From a function
+hlil = func.hlil
+hlil_ssa = func.hlil.ssa_form
+
+# Get HLIL at specific address
+hlil_instr = func.get_high_level_il_at(0x401000)
+
+# From MLIL
+mlil_instr = func.get_medium_level_il_at(0x401000)
+if mlil_instr.hlil:
+    hlil_instr = mlil_instr.hlil
+
+# Iterate all instructions
+for instr in hlil.instructions:
+    print(instr)
+```
+
+## HighLevelILFunction
+
+Represents a function in HLIL.
+
+<ParamField path="source_function" type="Function">
+  The original Function object
+</ParamField>
+
+<ParamField path="ssa_form" type="HighLevelILFunction">
+  SSA form of this IL function
+</ParamField>
+
+<ParamField path="non_ssa_form" type="HighLevelILFunction">
+  Non-SSA form
+</ParamField>
+
+<ParamField path="root" type="HighLevelILInstruction">
+  Root instruction (typically a BLOCK)
+</ParamField>
+
+<ParamField path="instructions" type="Generator[HighLevelILInstruction]">
+  All IL instructions (flattened)
+</ParamField>
+
+<ParamField path="basic_blocks" type="list[HighLevelILBasicBlock]">
+  Basic blocks in the IL function
+</ParamField>
+
+### Getting Disassembly
+
+```python
+# Get formatted HLIL text
+for line in hlil.root.lines:
+    tokens = line.tokens
+    text = ''.join(t.text for t in tokens)
+    print(text)
+
+# Get specific instruction lines
+instr = hlil[10]
+for line in instr.lines:
+    print(''.join(t.text for t in line.tokens))
+```
+
+## HighLevelILInstruction
+
+Base class for all HLIL instructions.
+
+### Core Properties
+
+<ParamField path="operation" type="HighLevelILOperation">
+  The operation type (HLIL_IF, HLIL_CALL, etc.)
+</ParamField>
+
+<ParamField path="address" type="int">
+  Address of the native instruction
+</ParamField>
+
+<ParamField path="size" type="int">
+  Size of the operation in bytes
+</ParamField>
+
+<ParamField path="expr_index" type="int">
+  Expression index in the IL
+</ParamField>
+
+<ParamField path="instr_index" type="int">
+  Instruction index
+</ParamField>
+
+<ParamField path="function" type="HighLevelILFunction">
+  The IL function containing this instruction
+</ParamField>
+
+<ParamField path="parent" type="HighLevelILInstruction">
+  Parent instruction in the AST
+</ParamField>
+
+### AST vs Flat Form
+
+HLIL has two representations:
+
+```python
+# AST form (default) - preserves structure
+instr_ast = hlil[5]
+for child in instr_ast.operands:
+    if isinstance(child, HighLevelILInstruction):
+        print(f"Child: {child}")
+
+# Non-AST form - flattened
+instr_flat = instr_ast.non_ast
+print(f"Flat: {instr_flat}")
+
+# Switch between forms
+instr.ast        # Get AST version
+instr.non_ast    # Get flat version
+```
+
+## Control Flow Structures
+
+### If Statements
+
+```python
+# HLIL_IF: if (condition) { true } else { false }
+if instr.operation == HighLevelILOperation.HLIL_IF:
+    condition = instr.condition
+    true_branch = instr.true
+    false_branch = instr.false
+    
+    print(f"if ({condition})")
+    print(f"  true: {true_branch}")
+    if false_branch:
+        print(f"  else: {false_branch}")
+```
+
+### Loops
+
+```python
+# HLIL_WHILE: while (condition) { body }
+if instr.operation == HighLevelILOperation.HLIL_WHILE:
+    condition = instr.condition
+    body = instr.body
+    print(f"while ({condition})")
+    print(f"  {body}")
+
+# HLIL_DO_WHILE: do { body } while (condition)
+if instr.operation == HighLevelILOperation.HLIL_DO_WHILE:
+    body = instr.body
+    condition = instr.condition
+    print(f"do {{ {body} }} while ({condition})")
+
+# HLIL_FOR: for (init; condition; update) { body }
+if instr.operation == HighLevelILOperation.HLIL_FOR:
+    init = instr.init
+    condition = instr.condition
+    update = instr.update
+    body = instr.body
+    print(f"for ({init}; {condition}; {update})")
+    print(f"  {body}")
+```
+
+### Switch Statements
+
+```python
+# HLIL_SWITCH: switch (condition) { cases }
+if instr.operation == HighLevelILOperation.HLIL_SWITCH:
+    condition = instr.condition
+    default = instr.default
+    cases = instr.cases
+    
+    print(f"switch ({condition})")
+    for case in cases:
+        # HLIL_CASE
+        values = case.values
+        body = case.body
+        print(f"  case {values}: {body}")
+    if default:
+        print(f"  default: {default}")
+```
+
+### Blocks
+
+```python
+# HLIL_BLOCK: sequence of statements
+if instr.operation == HighLevelILOperation.HLIL_BLOCK:
+    body = instr.body  # List of instructions
+    for stmt in body:
+        print(f"  {stmt}")
+```
+
+## Variable Operations
+
+```python
+# HLIL_VAR: read variable
+if instr.operation == HighLevelILOperation.HLIL_VAR:
+    var = instr.var
+    print(f"Read {var.name}: {var.type}")
+
+# HLIL_VAR_INIT: variable initialization
+if instr.operation == HighLevelILOperation.HLIL_VAR_INIT:
+    dest = instr.dest  # Variable
+    src = instr.src    # Expression
+    print(f"{dest.name} = {src}")
+
+# HLIL_ASSIGN: assignment
+if instr.operation == HighLevelILOperation.HLIL_ASSIGN:
+    dest = instr.dest  # Can be VAR, DEREF, STRUCT_FIELD, etc.
+    src = instr.src
+    print(f"{dest} = {src}")
+
+# HLIL_VAR_DECLARE: variable declaration
+if instr.operation == HighLevelILOperation.HLIL_VAR_DECLARE:
+    var = instr.var
+    print(f"Declare {var.name}: {var.type}")
+```
+
+## Function Calls
+
+```python
+# HLIL_CALL: function call
+if instr.operation == HighLevelILOperation.HLIL_CALL:
+    dest = instr.dest      # Call target
+    params = instr.params  # List of parameters
+    
+    print(f"Call {dest}")
+    for i, param in enumerate(params):
+        print(f"  Param {i}: {param}")
+
+# Get call target
+from binaryninja.commonil import Constant
+if isinstance(dest, Constant):
+    target_addr = dest.value
+    target_func = hlil.source_function.view.get_function_at(target_addr)
+    if target_func:
+        print(f"Calling: {target_func.name}")
+
+# HLIL_TAILCALL: tail call
+if instr.operation == HighLevelILOperation.HLIL_TAILCALL:
+    dest = instr.dest
+    params = instr.params
+    print(f"Tail call {dest}")
+
+# HLIL_SYSCALL: system call
+if instr.operation == HighLevelILOperation.HLIL_SYSCALL:
+    params = instr.params
+    print(f"Syscall({', '.join(str(p) for p in params)})")
+```
+
+## Memory Operations
+
+```python
+# HLIL_DEREF: dereference pointer
+if instr.operation == HighLevelILOperation.HLIL_DEREF:
+    src = instr.src
+    print(f"*({src})")
+
+# HLIL_ADDRESS_OF: take address
+if instr.operation == HighLevelILOperation.HLIL_ADDRESS_OF:
+    src = instr.src
+    print(f"&({src})")
+
+# HLIL_STRUCT_FIELD: structure member access
+if instr.operation == HighLevelILOperation.HLIL_STRUCT_FIELD:
+    src = instr.src
+    offset = instr.offset
+    member_index = instr.member_index
+    print(f"{src}.field_{offset}")
+
+# HLIL_ARRAY_INDEX: array indexing
+if instr.operation == HighLevelILOperation.HLIL_ARRAY_INDEX:
+    src = instr.src
+    index = instr.index
+    print(f"{src}[{index}]")
+```
+
+## Constants and Literals
+
+```python
+# HLIL_CONST: integer constant
+if instr.operation == HighLevelILOperation.HLIL_CONST:
+    value = instr.value
+    print(f"Constant: {value:#x}")
+
+# HLIL_CONST_PTR: pointer constant
+if instr.operation == HighLevelILOperation.HLIL_CONST_PTR:
+    value = instr.value
+    print(f"Pointer: {value:#x}")
+
+# HLIL_FLOAT_CONST: floating point constant
+if instr.operation == HighLevelILOperation.HLIL_FLOAT_CONST:
+    value = instr.value
+    print(f"Float: {value}")
+
+# HLIL_CONST_DATA: constant data (arrays, structs)
+if instr.operation == HighLevelILOperation.HLIL_CONST_DATA:
+    data = instr.constant_data
+    print(f"Data: {data}")
+```
+
+## Return Statements
+
+```python
+# HLIL_RET: return statement
+if instr.operation == HighLevelILOperation.HLIL_RET:
+    return_values = instr.src  # List of return values
+    if return_values:
+        print(f"return {', '.join(str(v) for v in return_values)}")
+    else:
+        print("return")
+
+# HLIL_NORET: doesn't return
+if instr.operation == HighLevelILOperation.HLIL_NORET:
+    print("<no return>")
+
+# HLIL_UNREACHABLE: unreachable code
+if instr.operation == HighLevelILOperation.HLIL_UNREACHABLE:
+    print("<unreachable>")
+```
+
+## Goto and Labels
+
+```python
+# HLIL_GOTO: goto statement
+if instr.operation == HighLevelILOperation.HLIL_GOTO:
+    target = instr.target  # GotoLabel
+    print(f"goto {target.name}")
+
+# HLIL_LABEL: label definition
+if instr.operation == HighLevelILOperation.HLIL_LABEL:
+    target = instr.target  # GotoLabel
+    print(f"{target.name}:")
+
+# Working with labels
+label = instr.target  # GotoLabel
+print(f"Label: {label.name}")
+print(f"ID: {label.id}")
+
+# Get label definition
+label_def = label.definition
+if label_def:
+    print(f"Defined at: {label_def}")
+
+# Get label uses
+for use in label.uses:
+    print(f"Used at: {use}")
+```
+
+## SSA Form
+
+HLIL SSA is useful for advanced analysis:
+
+```python
+# Get SSA form
+hlil_ssa = hlil.ssa_form
+
+for instr in hlil_ssa.instructions:
+    # HLIL_VAR_INIT_SSA
+    if instr.operation == HighLevelILOperation.HLIL_VAR_INIT_SSA:
+        var_ssa = instr.dest  # SSAVariable
+        src = instr.src
+        print(f"{var_ssa.var.name}#{var_ssa.version} = {src}")
+    
+    # HLIL_VAR_SSA
+    elif instr.operation == HighLevelILOperation.HLIL_VAR_SSA:
+        var_ssa = instr.var
+        print(f"Read {var_ssa.var.name}#{var_ssa.version}")
+    
+    # HLIL_VAR_PHI
+    elif instr.operation == HighLevelILOperation.HLIL_VAR_PHI:
+        dest = instr.dest
+        sources = instr.src
+        src_str = ', '.join(f"{s.var.name}#{s.version}" for s in sources)
+        print(f"{dest.var.name}#{dest.version} = φ({src_str})")
+
+# Get definition of SSA variable
+var_ssa = instr.var
+def_instr = var_ssa.def_site
+if def_instr:
+    print(f"Defined at: {def_instr}")
+
+# Get uses
+for use in var_ssa.use_sites:
+    print(f"Used at: {use}")
+```
+
+## Traversing the AST
+
+```python
+def traverse_hlil(instr, depth=0):
+    """Recursively traverse HLIL AST."""
+    indent = "  " * depth
+    print(f"{indent}{instr.operation.name}")
+    
+    # Visit operands
+    for operand in instr.operands:
+        if isinstance(operand, HighLevelILInstruction):
+            traverse_hlil(operand, depth + 1)
+        elif isinstance(operand, list):
+            for item in operand:
+                if isinstance(item, HighLevelILInstruction):
+                    traverse_hlil(item, depth + 1)
+
+# Usage
+traverse_hlil(hlil.root)
+```
+
+## Variable References
+
+Find all variable accesses:
+
+```python
+# Get variables read/written
+for instr in hlil.instructions:
+    vars_read = instr.vars_read
+    vars_written = instr.vars_written
+    vars_address_taken = instr.vars_address_taken
+    
+    if vars_read:
+        print(f"Reads: {', '.join(v.name for v in vars_read)}")
+    if vars_written:
+        print(f"Writes: {', '.join(v.name for v in vars_written)}")
+    if vars_address_taken:
+        print(f"Address taken: {', '.join(v.name for v in vars_address_taken)}")
+```
+
+## Example: Find Security Issues
+
+```python
+def find_unsafe_calls(hlil_func):
+    """Find potentially unsafe function calls."""
+    from binaryninja.commonil import Call, Constant
+    
+    unsafe_functions = {
+        'strcpy': 'Use strncpy instead',
+        'sprintf': 'Use snprintf instead',
+        'gets': 'Never use gets',
+        'scanf': 'Validate input'
+    }
+    
+    issues = []
+    
+    for instr in hlil_func.instructions:
+        if isinstance(instr, Call):
+            # Try to get function name
+            target_name = None
+            if isinstance(instr.dest, Constant):
+                target_func = hlil_func.source_function.view.get_function_at(
+                    instr.dest.value
+                )
+                if target_func:
+                    target_name = target_func.name
+            
+            # Check if unsafe
+            if target_name:
+                for unsafe, reason in unsafe_functions.items():
+                    if unsafe in target_name.lower():
+                        issues.append({
+                            'address': instr.address,
+                            'function': target_name,
+                            'reason': reason,
+                            'params': [str(p) for p in instr.params]
+                        })
+    
+    return issues
+
+# Usage
+for issue in find_unsafe_calls(func.hlil):
+    print(f"{issue['address']:#x}: Call to {issue['function']}")
+    print(f"  Warning: {issue['reason']}")
+    print(f"  Parameters: {', '.join(issue['params'])}")
+```
+
+## Example: Extract String Operations
+
+```python
+def find_string_operations(hlil_func):
+    """Find operations on string buffers."""
+    from binaryninja.commonil import Call
+    
+    string_funcs = ['strcpy', 'strcat', 'sprintf', 'memcpy', 'strncpy']
+    operations = []
+    
+    for instr in hlil_func.instructions:
+        if isinstance(instr, Call):
+            # Get function name
+            if isinstance(instr.dest, Constant):
+                target = hlil_func.source_function.view.get_function_at(
+                    instr.dest.value
+                )
+                
+                if target and any(sf in target.name.lower() 
+                                 for sf in string_funcs):
+                    operations.append({
+                        'address': instr.address,
+                        'function': target.name,
+                        'params': instr.params
+                    })
+    
+    return operations
+```
+
+## Example: Control Flow Analysis
+
+```python
+def analyze_control_flow(hlil_func):
+    """Analyze control flow complexity."""
+    stats = {
+        'if_statements': 0,
+        'loops': 0,
+        'switch_statements': 0,
+        'goto_statements': 0,
+        'max_depth': 0
+    }
+    
+    def analyze_recursive(instr, depth=0):
+        stats['max_depth'] = max(stats['max_depth'], depth)
+        
+        if instr.operation == HighLevelILOperation.HLIL_IF:
+            stats['if_statements'] += 1
+            analyze_recursive(instr.true, depth + 1)
+            if instr.false:
+                analyze_recursive(instr.false, depth + 1)
+        
+        elif instr.operation in [HighLevelILOperation.HLIL_WHILE,
+                                 HighLevelILOperation.HLIL_DO_WHILE,
+                                 HighLevelILOperation.HLIL_FOR]:
+            stats['loops'] += 1
+            analyze_recursive(instr.body, depth + 1)
+        
+        elif instr.operation == HighLevelILOperation.HLIL_SWITCH:
+            stats['switch_statements'] += 1
+        
+        elif instr.operation == HighLevelILOperation.HLIL_GOTO:
+            stats['goto_statements'] += 1
+        
+        # Recurse into operands
+        for operand in instr.operands:
+            if isinstance(operand, HighLevelILInstruction):
+                analyze_recursive(operand, depth)
+            elif isinstance(operand, list):
+                for item in operand:
+                    if isinstance(item, HighLevelILInstruction):
+                        analyze_recursive(item, depth)
+    
+    analyze_recursive(hlil_func.root)
+    return stats
+
+# Usage
+stats = analyze_control_flow(func.hlil)
+print(f"If statements: {stats['if_statements']}")
+print(f"Loops: {stats['loops']}")
+print(f"Switch statements: {stats['switch_statements']}")
+print(f"Max nesting depth: {stats['max_depth']}")
+```
+
+## See Also
+
+- [Medium Level IL](/api/python/mediumlevelil) - Lower-level IL
+- [Low Level IL](/api/python/lowlevelil) - Lowest-level IL
+- [Function API](/api/python/function) - Function analysis
+- [Types API](/api/python/types) - Type system

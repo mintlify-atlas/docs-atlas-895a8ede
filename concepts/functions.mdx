@@ -1,0 +1,575 @@
+---
+title: Functions
+description: Working with function analysis, control flow, and IL in Binary Ninja
+---
+
+## Overview
+
+The **Function** class represents a function in a binary. Functions are the primary unit of analysis in Binary Ninja, containing disassembly, control flow graphs, intermediate language representations, variables, and type information.
+
+<Info>
+Binary Ninja automatically discovers and analyzes functions during initial analysis, but you can also manually create, modify, and analyze functions.
+</Info>
+
+## Accessing Functions
+
+### Getting Functions from BinaryView
+
+```python
+import binaryninja
+from binaryninja import load
+
+bv = load("/path/to/binary")
+
+# Get all functions
+for func in bv.functions:
+    print(f"Function: {func.name} at 0x{func.start:x}")
+
+# Get function at specific address
+func = bv.get_function_at(0x401000)
+
+# Get functions containing an address
+funcs = bv.get_functions_containing(0x401234)
+
+# Get function by name
+main_func = bv.get_function_by_name("main")
+
+# Get functions by symbol
+sym = bv.get_symbol_by_name("main")
+if sym:
+    func = bv.get_function_at(sym.address)
+```
+
+### Creating Functions
+
+```python
+# Add function at address (auto-discovered)
+bv.add_function(0x401000)
+
+# Create user function with platform
+bv.create_user_function(0x401000, plat=bv.platform)
+
+# Remove function
+bv.remove_function(func)
+
+# Remove user function (keeps auto function)
+bv.remove_user_function(func)
+```
+
+## Function Properties
+
+### Basic Information
+
+```python
+# Name and location
+print(f"Name: {func.name}")
+print(f"Start: 0x{func.start:x}")
+print(f"Highest address: 0x{func.highest_address:x}")
+print(f"Total bytes: {func.total_bytes}")
+
+# Symbol information
+print(f"Symbol: {func.symbol.full_name}")
+print(f"Symbol type: {func.symbol.type}")
+
+# Auto vs user defined
+if func.auto:
+    print("Auto-discovered function")
+else:
+    print("User-defined function")
+
+# Can return
+if func.can_return:
+    print("Function can return")
+else:
+    print("Function does not return (noreturn)")
+```
+
+### Architecture and Platform
+
+```python
+# Architecture
+arch = func.arch
+print(f"Architecture: {arch.name}")
+
+# Platform  
+platform = func.platform
+print(f"Platform: {platform.name}")
+
+# Calling convention
+cc = func.calling_convention
+print(f"Calling convention: {cc.name}")
+print(f"Int args: {cc.int_arg_regs}")
+print(f"Return: {cc.int_return_reg}")
+```
+
+### Function Type
+
+```python
+# Get function type
+func_type = func.type
+print(f"Return type: {func_type.return_value}")
+print(f"Parameters: {len(func_type.parameters)}")
+
+for param in func_type.parameters:
+    print(f"  {param.name}: {param.type}")
+
+# Set function type
+from binaryninja import Type
+
+# Parse type string
+new_type = bv.parse_type_string("int (char* str, int len)")[0]
+func.type = new_type
+
+# Or build type manually
+int_type = Type.int(4)
+char_ptr = Type.pointer(bv.arch, Type.char())
+param_types = [char_ptr, int_type]
+func.type = Type.function(int_type, param_types)
+```
+
+## Basic Blocks
+
+### Accessing Basic Blocks
+
+```python
+# Iterate over basic blocks
+for block in func:
+    print(f"Block at 0x{block.start:x}-0x{block.end:x}")
+    print(f"  Length: {block.length}")
+    print(f"  Instruction count: {block.instruction_count}")
+
+# Get basic block at address
+block = func.get_basic_block_at(0x401234)
+
+# Access block properties
+if block:
+    print(f"Outgoing edges: {len(block.outgoing_edges)}")
+    print(f"Incoming edges: {len(block.incoming_edges)}")
+    
+    # Check if block has specific properties
+    if block.can_exit:
+        print("Block can exit function")
+```
+
+### Control Flow
+
+```python
+# Examine control flow edges
+for block in func:
+    for edge in block.outgoing_edges:
+        target = edge.target
+        edge_type = edge.type
+        print(f"Edge from 0x{block.start:x} to 0x{target.start:x}")
+        print(f"  Type: {edge_type}")
+
+# Get dominators
+for block in func:
+    dom = block.immediate_dominator
+    if dom:
+        print(f"Block 0x{block.start:x} dominated by 0x{dom.start:x}")
+```
+
+## Instructions
+
+### Disassembly
+
+```python
+# Iterate instructions in function
+for block in func:
+    for instr in block:
+        # instr is a tuple: (tokens, address)
+        tokens, addr = instr
+        
+        # Convert tokens to string
+        text = "".join(str(t) for t in tokens)
+        print(f"0x{addr:x}: {text}")
+
+# Get instruction at address
+instrs = func.get_disassembly(address)
+for line in instrs:
+    print(line)
+
+# Get instruction length
+length = func.get_instruction_length(address)
+print(f"Instruction length: {length}")
+```
+
+### Instruction Information
+
+```python
+# Get instruction info
+info = arch.get_instruction_info(bv.read(address, 15), address)
+if info:
+    print(f"Length: {info.length}")
+    for branch in info.branches:
+        print(f"Branch to: 0x{branch.target:x}")
+        print(f"Branch type: {branch.type}")
+```
+
+## Intermediate Language (IL)
+
+### Low Level IL
+
+```python
+# Get LLIL function
+llil = func.low_level_il
+
+# Iterate LLIL instructions
+for block in llil:
+    for instr in block:
+        print(f"0x{instr.address:x}: {instr}")
+
+# Get LLIL at specific address
+llil_instr = func.get_low_level_il_at(address)
+if llil_instr:
+    print(f"LLIL: {llil_instr}")
+    print(f"Operation: {llil_instr.operation}")
+
+# SSA form
+llil_ssa = func.low_level_il.ssa_form
+for instr in llil_ssa.instructions:
+    print(instr)
+```
+
+### Medium Level IL
+
+```python
+# Get MLIL function  
+mlil = func.medium_level_il
+
+# Iterate MLIL instructions
+for block in mlil:
+    for instr in block:
+        print(f"MLIL: {instr}")
+
+# Get MLIL at address
+mlil_instr = func.get_medium_level_il_at(address)
+
+# SSA form
+mlil_ssa = func.medium_level_il.ssa_form
+
+# Get SSA variables
+for var in mlil_ssa.ssa_vars:
+    print(f"{var.var.name}#{var.version}")
+    
+    # Get definition
+    def_instr = mlil_ssa.get_ssa_var_definition(var)
+    print(f"  Defined: {def_instr}")
+    
+    # Get uses
+    uses = mlil_ssa.get_ssa_var_uses(var)
+    print(f"  Used {len(uses)} times")
+```
+
+### High Level IL
+
+```python
+# Get HLIL function
+hlil = func.high_level_il
+
+# Iterate HLIL instructions
+for block in hlil:
+    for instr in block:
+        print(f"HLIL: {instr}")
+
+# Get HLIL root (AST root)
+root = hlil.root
+print(f"Function body: {root}")
+
+# SSA form
+hlil_ssa = func.high_level_il.ssa_form
+```
+
+## Variables
+
+### Accessing Variables
+
+```python
+# Get all variables
+for var in func.vars:
+    print(f"Variable: {var.name}")
+    print(f"  Type: {var.type}")
+    print(f"  Source: {var.source_type}")
+
+# Stack variables
+for var in func.stack_layout:
+    print(f"Stack var: {var.name} at offset {var.storage}")
+
+# Parameter variables
+for var in func.parameter_vars:
+    print(f"Parameter: {var.name}")
+
+# Get variable at address
+var = func.get_variable_at(address)
+```
+
+### Modifying Variables
+
+```python
+from binaryninja import Type
+
+# Set variable name
+var = func.vars[0]
+func.create_user_var(var, Type.int(4), "my_var")
+
+# Set variable type
+func.create_user_var(var, Type.pointer(arch, Type.char()), var.name)
+```
+
+## Register Values
+
+### Value Analysis
+
+```python
+# Get register value at address
+value = func.get_reg_value_at(address, 'rax')
+
+from binaryninja.enums import RegisterValueType
+
+if value.type == RegisterValueType.ConstantValue:
+    print(f"RAX = 0x{value.value:x}")
+elif value.type == RegisterValueType.StackFrameOffset:
+    print(f"RAX = stack offset {value.offset}")
+else:
+    print(f"RAX = {value}")
+
+# Get register value after instruction
+value_after = func.get_reg_value_after(address, 'rdi')
+
+# Get stack contents
+stack_value = func.get_stack_contents_at(address, offset, size)
+```
+
+### Parameter Values
+
+```python
+# Get parameter values at call site
+call_site = 0x401234
+params = func.get_parameter_at(call_site, None, 0)
+for i, param in enumerate(params):
+    print(f"Param {i}: {param}")
+```
+
+## Call Sites and References
+
+### Callers and Callees
+
+```python
+# Get functions that call this function
+for caller in func.callers:
+    print(f"Called by: {caller.name}")
+
+# Get call sites
+for ref in func.call_sites:
+    print(f"Called from: 0x{ref.address:x}")
+    if ref.function:
+        print(f"  In function: {ref.function.name}")
+
+# Get functions called by this function  
+for callee in func.callees:
+    print(f"Calls: {callee.name}")
+```
+
+### Code References
+
+```python
+# Get code references to address
+refs = bv.get_code_refs(address)
+for ref in refs:
+    print(f"Referenced from: 0x{ref.address:x}")
+    if ref.function:
+        print(f"  In: {ref.function.name}")
+
+# Get data references
+data_refs = bv.get_data_refs(address)
+for ref in data_refs:
+    print(f"Data ref from: 0x{ref:x}")
+```
+
+## Comments and Tags
+
+### Comments
+
+```python
+# Set comment at address
+func.set_comment_at(0x401234, "This is a comment")
+
+# Get comment
+comment = func.get_comment_at(0x401234)
+print(comment)
+
+# Set function comment
+func.comment = "This function does XYZ"
+```
+
+### Tags
+
+```python
+from binaryninja import Tag
+
+# Create tag type
+tag_type = bv.create_tag_type("Important", "🔴")
+
+# Create and add tag
+tag = Tag(tag_type, "Check this code")
+func.add_tag(0x401234, tag)
+
+# Get tags
+for arch, addr, tag in func.address_tags:
+    print(f"Tag at 0x{addr:x}: {tag.data}")
+```
+
+## Analysis
+
+### Triggering Analysis
+
+```python
+# Reanalyze function
+func.reanalyze()
+
+# Request advanced analysis
+func.request_advanced_analysis_data()
+
+# Mark for updates
+func.mark_updates_required()
+
+# Set analysis skip override
+from binaryninja.enums import FunctionAnalysisSkipOverride
+
+func.analysis_skip_override = FunctionAnalysisSkipOverride.NeverSkipFunctionAnalysis
+```
+
+### Analysis Information
+
+```python
+from binaryninja.enums import AnalysisState
+
+# Check if analysis is complete
+if func.analysis_state == AnalysisState.FinishedState:
+    print("Analysis complete")
+
+# Get analysis performance info
+info = func.analysis_performance_info
+print(f"Analysis time: {info.analysis_time}ms")
+print(f"Update count: {info.update_count}")
+```
+
+## Practical Examples
+
+### Example 1: Function Summary
+
+```python
+def print_function_summary(func):
+    print(f"\n=== {func.name} ===")
+    print(f"Address: 0x{func.start:x}")
+    print(f"Size: {func.total_bytes} bytes")
+    print(f"Basic blocks: {len(list(func))}")
+    print(f"Calling convention: {func.calling_convention.name}")
+    
+    print(f"\nType: {func.type}")
+    
+    print(f"\nVariables ({len(func.vars)}):")
+    for var in func.vars:
+        print(f"  {var.name}: {var.type}")
+    
+    print(f"\nCalls to:")
+    for callee in func.callees:
+        print(f"  {callee.name}")
+    
+    print(f"\nCalled by:")
+    for caller in func.callers:
+        print(f"  {caller.name}")
+
+bv = load("/path/to/binary")
+for func in bv.functions[:5]:
+    print_function_summary(func)
+```
+
+### Example 2: Finding String References
+
+```python
+def find_string_refs(func, bv):
+    """Find all string references in a function"""
+    print(f"\nStrings in {func.name}:")
+    
+    for block in func:
+        for instr_tokens, addr in block:
+            # Get data references from this address
+            data_refs = bv.get_data_refs(addr)
+            
+            for ref in data_refs:
+                # Check if reference points to a string
+                for string in bv.strings:
+                    if string.start == ref:
+                        print(f"  0x{addr:x}: \"{string.value}\"")
+
+bv = load("/path/to/binary")
+main = bv.get_function_by_name("main")
+if main:
+    find_string_refs(main, bv)
+```
+
+### Example 3: Control Flow Analysis
+
+```python
+def analyze_control_flow(func):
+    """Analyze control flow complexity"""
+    blocks = list(func)
+    edges = sum(len(block.outgoing_edges) for block in blocks)
+    
+    # Calculate cyclomatic complexity: E - N + 2
+    # (edges - nodes + 2 for single function)
+    complexity = edges - len(blocks) + 2
+    
+    print(f"\n{func.name}:")
+    print(f"  Basic blocks: {len(blocks)}")
+    print(f"  Edges: {edges}")
+    print(f"  Cyclomatic complexity: {complexity}")
+    
+    # Find loops
+    loop_blocks = [b for b in blocks if b.immediate_dominator in 
+                   [e.target for e in b.outgoing_edges]]
+    print(f"  Loop blocks: {len(loop_blocks)}")
+
+bv = load("/path/to/binary") 
+for func in bv.functions:
+    analyze_control_flow(func)
+```
+
+### Example 4: Finding Syscalls
+
+```python
+from binaryninja.enums import LowLevelILOperation
+from itertools import chain
+
+def find_syscalls(bv):
+    """Find all syscalls in binary"""
+    cc = bv.platform.system_call_convention
+    if not cc:
+        print("No syscall convention")
+        return
+    
+    syscall_reg = cc.int_arg_regs[0]
+    
+    for func in bv.functions:
+        syscalls = (
+            il for il in chain.from_iterable(func.low_level_il)
+            if il.operation == LowLevelILOperation.LLIL_SYSCALL
+        )
+        
+        for il in syscalls:
+            value = func.get_reg_value_at(il.address, syscall_reg)
+            if value.type == RegisterValueType.ConstantValue:
+                print(f"0x{il.address:x} in {func.name}: "
+                      f"syscall {value.value}")
+
+bv = load("/bin/ls")
+find_syscalls(bv)
+```
+
+## Related Concepts
+
+- [Binary Views](./binary-views) - Binary file representation
+- [Intermediate Languages](./intermediate-languages) - IL representations  
+- [Types](./types) - Type system and function signatures
+- [Architectures](./architectures) - Architecture-specific details

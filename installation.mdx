@@ -1,0 +1,337 @@
+---
+title: Installation
+description: Set up the Binary Ninja API for C++, Python, and Rust development
+---
+
+# Installation
+
+This guide will walk you through setting up the Binary Ninja API for your preferred programming language.
+
+<Note>
+**Prerequisites**
+- Binary Ninja installed with a valid license
+- For headless/standalone tools: A license with headless support
+- C++ compiler (for C++ and Rust development)
+</Note>
+
+## Version Matching
+
+<Warning>
+**Critical**: The API version must match your Binary Ninja installation.
+
+Binary Ninja includes an `api_REVISION.txt` file that specifies the exact API commit to use:
+- **Windows/Linux**: Located in the root install folder
+- **macOS**: Located in `Binary Ninja.app/Contents/Resources/`
+
+Always checkout the matching API version:
+```bash
+git checkout $(cat api_REVISION.txt | awk -F/ '{print $NF}')
+```
+</Warning>
+
+## Python API
+
+The Python API is the easiest to get started with and is included with your Binary Ninja installation.
+
+<Steps>
+  <Step title="Locate the Python API">
+    The Python API is automatically installed with Binary Ninja. You just need to add it to your Python path.
+
+    <Tabs>
+      <Tab title="macOS">
+        ```bash
+        export PYTHONPATH="$PYTHONPATH:/Applications/Binary Ninja.app/Contents/Resources/python"
+        ```
+      </Tab>
+      <Tab title="Linux">
+        ```bash
+        export PYTHONPATH="$PYTHONPATH:$HOME/binaryninja/python"
+        ```
+      </Tab>
+      <Tab title="Windows">
+        ```powershell
+        set PYTHONPATH=%PYTHONPATH%;C:\Program Files\Vector35\BinaryNinja\python
+        ```
+      </Tab>
+    </Tabs>
+
+    Add this to your shell profile (`.bashrc`, `.zshrc`, etc.) for persistent access.
+  </Step>
+
+  <Step title="Verify Installation">
+    Test that Python can import the module:
+
+    ```python
+    import binaryninja
+    print(binaryninja.core_version())
+    ```
+  </Step>
+
+  <Step title="Install for Plugin Development">
+    For developing plugins, clone the API repository:
+
+    ```bash
+    git clone https://github.com/Vector35/binaryninja-api.git
+    cd binaryninja-api
+    git checkout $(cat /path/to/api_REVISION.txt | awk -F/ '{print $NF}')
+    ```
+
+    Python examples are located in `python/examples/`.
+  </Step>
+</Steps>
+
+## C++ API
+
+The C++ API requires building from source using CMake.
+
+<Steps>
+  <Step title="Clone and Checkout">
+    Clone the repository and checkout the correct version:
+
+    ```bash
+    git clone https://github.com/Vector35/binaryninja-api.git
+    cd binaryninja-api
+    git checkout $(cat /path/to/api_REVISION.txt | awk -F/ '{print $NF}')
+    git submodule update --init --recursive
+    ```
+  </Step>
+
+  <Step title="Configure Build">
+    Create an out-of-source build directory and configure:
+
+    ```bash
+    cmake -S . -B build
+    ```
+
+    <Note>
+    **Common CMake Options:**
+    - `-DBN_INSTALL_DIR=/path/to/binaryninja` - Specify Binary Ninja location if not in default path
+    - `-DBN_API_BUILD_EXAMPLES=ON` - Build example plugins
+    - `-DHEADLESS=ON` - Build without UI dependencies (for headless installations)
+    - `-DCMAKE_BUILD_TYPE=Release` - Build optimized release version
+    </Note>
+
+    <Tabs>
+      <Tab title="macOS">
+        ```bash
+        cmake -S . -B build \
+          -DBN_INSTALL_DIR="/Applications/Binary Ninja.app/Contents/MacOS" \
+          -DBN_API_BUILD_EXAMPLES=ON
+        ```
+      </Tab>
+      <Tab title="Linux">
+        ```bash
+        cmake -S . -B build \
+          -DBN_INSTALL_DIR="$HOME/binaryninja" \
+          -DBN_API_BUILD_EXAMPLES=ON
+        ```
+      </Tab>
+      <Tab title="Windows">
+        ```powershell
+        cmake -S . -B build ^
+          -DBN_INSTALL_DIR="C:\Program Files\Vector35\BinaryNinja" ^
+          -DBN_API_BUILD_EXAMPLES=ON
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Build">
+    Compile the API library:
+
+    ```bash
+    cmake --build build -j8
+    ```
+
+    This creates `libbinaryninjaapi.a` (or `.lib` on Windows) in `build/out/`.
+  </Step>
+
+  <Step title="Install Examples (Optional)">
+    If you built examples, install them to your plugins directory:
+
+    ```bash
+    cd build
+    make install
+    ```
+  </Step>
+</Steps>
+
+### C++ Project Setup
+
+To use the API in your CMake project:
+
+```cmake CMakeLists.txt
+cmake_minimum_required(VERSION 3.15)
+project(my_plugin)
+
+# Find Binary Ninja API
+set(BN_API_PATH "/path/to/binaryninja-api" CACHE PATH "Binary Ninja API Path")
+set(BN_INSTALL_DIR "/path/to/binaryninja" CACHE PATH "Binary Ninja Install Path")
+
+add_subdirectory(${BN_API_PATH} api)
+
+# Create your plugin
+add_library(my_plugin SHARED
+    src/plugin.cpp
+)
+
+target_link_libraries(my_plugin binaryninjaapi)
+
+# Set C++ standard
+set_target_properties(my_plugin PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+)
+```
+
+## Rust API
+
+The Rust API provides type-safe bindings with modern language features.
+
+<Warning>
+**Stability Notice**: The Rust API is actively under development. Breaking changes may occur. Pin to a specific commit for stability:
+
+```toml
+[dependencies]
+binaryninja = { git = "https://github.com/Vector35/binaryninja-api.git", rev = "abc123" }
+```
+</Warning>
+
+<Steps>
+  <Step title="Add Dependencies">
+    Add to your `Cargo.toml`:
+
+    ```toml Cargo.toml
+    [dependencies]
+    binaryninja = { git = "https://github.com/Vector35/binaryninja-api.git", branch = "dev" }
+    binaryninjacore-sys = { git = "https://github.com/Vector35/binaryninja-api.git", branch = "dev" }
+    ```
+
+    For a specific version, use the commit from `api_REVISION.txt`:
+
+    ```toml Cargo.toml
+    [dependencies]
+    binaryninja = { git = "https://github.com/Vector35/binaryninja-api.git", rev = "commit-hash-here" }
+    binaryninjacore-sys = { git = "https://github.com/Vector35/binaryninja-api.git", rev = "commit-hash-here" }
+    ```
+  </Step>
+
+  <Step title="Create build.rs">
+    Standalone executables need a `build.rs` to link against `binaryninjacore`:
+
+    ```rust build.rs
+    fn main() {
+        let link_path = std::env::var_os("DEP_BINARYNINJACORE_PATH")
+            .expect("DEP_BINARYNINJACORE_PATH not specified");
+        
+        println!("cargo::rustc-link-lib=dylib=binaryninjacore");
+        println!("cargo::rustc-link-search={}", link_path.to_str().unwrap());
+        
+        #[cfg(target_os = "linux")]
+        {
+            println!(
+                "cargo::rustc-link-arg=-Wl,-rpath,{0},-L{0}",
+                link_path.to_string_lossy()
+            );
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            let crate_name = std::env::var("CARGO_PKG_NAME")
+                .expect("CARGO_PKG_NAME not set");
+            let lib_name = crate_name.replace('-', "_");
+            println!(
+                "cargo::rustc-link-arg=-Wl,-install_name,@rpath/lib{}.dylib",
+                lib_name
+            );
+        }
+    }
+    ```
+
+    <Note>
+    **Plugins don't need `build.rs`** - only standalone executables require the build script.
+    </Note>
+  </Step>
+
+  <Step title="For Plugins: Configure Library Type">
+    If building a plugin, configure `Cargo.toml` for dynamic linking:
+
+    ```toml Cargo.toml
+    [lib]
+    crate-type = ["cdylib"]
+
+    [dependencies]
+    binaryninja = { git = "https://github.com/Vector35/binaryninja-api.git", branch = "dev" }
+    binaryninjacore-sys = { git = "https://github.com/Vector35/binaryninja-api.git", branch = "dev" }
+    ```
+  </Step>
+
+  <Step title="Build">
+    Build your project:
+
+    ```bash
+    cargo build --release
+    ```
+  </Step>
+</Steps>
+
+### Rust Plugin Setup
+
+For a Rust plugin, create the initialization function in `lib.rs`:
+
+```rust lib.rs
+#[allow(non_snake_case)]
+#[no_mangle]
+pub extern "C" fn CorePluginInit() -> bool {
+    // Initialize your plugin here
+    // Register architectures, views, workflows, etc.
+    true
+}
+```
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Binary Ninja Core Not Found (C++)">
+    This error means CMake couldn't locate your Binary Ninja installation.
+
+    **Solution**: Specify the installation path explicitly:
+    ```bash
+    cmake -S . -B build -DBN_INSTALL_DIR=/path/to/binaryninja
+    ```
+
+    Default paths:
+    - **macOS**: `/Applications/Binary Ninja.app/Contents/MacOS`
+    - **Linux**: `~/binaryninja` or `/opt/binaryninja`
+    - **Windows**: `C:\Program Files\Vector35\BinaryNinja`
+  </Accordion>
+
+  <Accordion title="64-bit Architecture Required">
+    Binary Ninja is 64-bit only. Ensure your compiler targets 64-bit:
+
+    **Windows MSVC**:
+    ```bash
+    cmake -G "Visual Studio 17 2022" -A x64 -S . -B build
+    ```
+
+    **Other platforms**: Use a 64-bit compiler toolchain.
+  </Accordion>
+
+  <Accordion title="License Errors">
+    Some API features require specific license types:
+
+    - **Headless operations** (standalone tools): Requires headless license
+    - **UI plugins**: Requires standard license
+    - Check your license at: Help → View License in Binary Ninja
+  </Accordion>
+
+  <Accordion title="Rust: DEP_BINARYNINJACORE_PATH not found">
+    Ensure `binaryninjacore-sys` is in your dependencies and you have a `build.rs` file.
+
+    The environment variable is set by the `binaryninjacore-sys` build script.
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+Now that you have the API installed, check out the [Quickstart](/quickstart) guide to see working examples in all three languages.

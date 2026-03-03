@@ -1,0 +1,162 @@
+---
+title: Architecture (Rust)
+description: Rust API for CPU architectures
+---
+
+The `Architecture` types provide access to CPU architecture information including registers, instruction sets, and disassembly.
+
+## Getting architectures
+
+```rust
+use binaryninja::architecture::Architecture;
+
+// Get by name
+let x86 = Architecture::by_name("x86_64");
+let arm = Architecture::by_name("aarch64");
+
+// List all architectures
+for arch in Architecture::list() {
+    println!("Architecture: {}", arch.name());
+}
+```
+
+## Architecture properties
+
+```rust
+let arch = Architecture::by_name("x86_64");
+
+// Basic properties
+println!("Name: {}", arch.name());
+println!("Address size: {} bytes", arch.address_size());
+println!("Default integer size: {} bytes", arch.default_integer_size());
+println!("Endianness: {:?}", arch.endianness());
+println!("Max instruction length: {}", arch.max_instruction_length());
+```
+
+## Registers
+
+```rust
+// List registers
+for reg in arch.registers() {
+    println!("Register: {}", reg.name());
+}
+
+// Get specific register
+if let Some(rax) = arch.register_by_name("rax") {
+    println!("RAX index: {}", rax.id());
+}
+
+// Stack pointer
+if let Some(sp) = arch.stack_pointer_register() {
+    println!("Stack pointer: {}", sp.name());
+}
+```
+
+## Flags
+
+```rust
+// List flags
+for flag in arch.flags() {
+    println!("Flag: {}", flag.name());
+}
+
+// Get specific flag
+if let Some(zf) = arch.flag_by_name("z") {
+    println!("Zero flag: {}", zf.name());
+}
+```
+
+## Disassembly
+
+```rust
+use binaryninja::binary_view::BinaryViewBase;
+
+let mut data = [0u8; 16];
+bv.read(&mut data, 0x1000);
+
+// Disassemble instruction
+if let Some((tokens, length)) = arch.get_instruction_text(&data, 0x1000) {
+    for token in tokens {
+        print!("{}", token.text());
+    }
+    println!(" (length: {})", length);
+}
+
+// Get instruction info (branches, etc.)
+if let Some(info) = arch.get_instruction_info(&data, 0x1000) {
+    println!("Instruction length: {}", info.length);
+    if !info.branch_targets.is_empty() {
+        println!("Branch targets: {:?}", info.branch_targets);
+    }
+}
+```
+
+## Calling conventions
+
+```rust
+// List calling conventions
+for cc in arch.calling_conventions() {
+    println!("Calling convention: {}", cc.name());
+}
+
+// Get default calling convention
+if let Some(default_cc) = arch.default_calling_convention() {
+    println!("Default: {}", default_cc.name());
+
+    // Argument registers
+    for reg in default_cc.int_arg_registers() {
+        println!("  Arg register: {}", reg.name());
+    }
+
+    // Return register
+    if let Some(ret_reg) = default_cc.int_return_register() {
+        println!("  Return register: {}", ret_reg.name());
+    }
+}
+```
+
+## Standalone platform
+
+```rust
+// Get standalone platform for architecture
+let platform = arch.standalone_platform();
+println!("Platform: {}", platform.name());
+```
+
+## Complete example
+
+```rust
+use binaryninja::architecture::Architecture;
+
+fn main() {
+    // Analyze x86_64 architecture
+    let arch = Architecture::by_name("x86_64");
+
+    println!("=== {} Architecture ===", arch.name());
+    println!("Address size: {} bytes", arch.address_size());
+    println!("Max instruction: {} bytes", arch.max_instruction_length());
+
+    // Registers
+    println!("\nRegisters:");
+    for reg in arch.registers().iter().take(8) {
+        println!("  {}", reg.name());
+    }
+
+    // Calling conventions
+    println!("\nCalling conventions:");
+    for cc in arch.calling_conventions() {
+        println!("  {}", cc.name());
+    }
+}
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Functions" href="/api/rust/function">
+    Analyze functions
+  </Card>
+  <Card title="IL" href="/api/rust/il">
+    Intermediate languages
+  </Card>
+</CardGroup>

@@ -1,0 +1,424 @@
+---
+title: Headless Automation
+description: Learn how to automate binary analysis using Binary Ninja in headless mode
+---
+
+This example demonstrates how to use Binary Ninja's headless mode for automated analysis, batch processing, and decompilation tasks using the Rust API.
+
+## Overview
+
+The `decompile.rs` example shows how to:
+- Initialize Binary Ninja in headless mode
+- Load and analyze binaries programmatically
+- Extract decompiled code (Pseudo C)
+- Configure disassembly settings
+- Process functions automatically
+
+## Complete Source Code
+
+```rust
+use binaryninja::binary_view::{BinaryView, BinaryViewBase, BinaryViewExt};
+use binaryninja::disassembly::{DisassemblyOption, DisassemblySettings};
+use binaryninja::function::Function;
+use binaryninja::linear_view::LinearViewObject;
+use binaryninja::tracing::TracingLogListener;
+
+fn decompile_to_c(view: &BinaryView, func: &Function) {
+    let settings = DisassemblySettings::new();
+    settings.set_option(DisassemblyOption::ShowAddress, false);
+    settings.set_option(DisassemblyOption::WaitForIL, true);
+    settings.set_option(DisassemblyOption::IndentHLILBody, false);
+    settings.set_option(DisassemblyOption::ShowCollapseIndicators, false);
+    settings.set_option(DisassemblyOption::ShowFunctionHeader, false);
+
+    let linear_view = LinearViewObject::language_representation(view, &settings, "Pseudo C");
+
+    let mut cursor = linear_view.create_cursor();
+    cursor.seek_to_address(func.highest_address());
+
+    let last = view.get_next_linear_disassembly_lines(&mut cursor.duplicate());
+    let first = view.get_previous_linear_disassembly_lines(&mut cursor);
+
+    let lines = first.into_iter().chain(&last);
+
+    for line in lines {
+        tracing::info!("{}", line);
+    }
+}
+
+pub fn main() {
+    tracing_subscriber::fmt::init();
+    let _listener = TracingLogListener::new().register();
+
+    let filename = std::env::args().nth(1).expect("No filename provided");
+
+    // This loads all the core architecture, platform, etc plugins
+    let headless_session =
+        binaryninja::headless::Session::new().expect("Failed to initialize session");
+
+    tracing::info!("Loading binary...");
+    let bv = headless_session
+        .load(&filename)
+        .expect("Couldn't open file!");
+
+    tracing::info!("File:  `{}`", bv.file());
+    tracing::info!("File size: `{:#x}`", bv.len());
+    tracing::info!("Function count: {}", bv.functions().len());
+
+    for func in &bv.functions() {
+        decompile_to_c(bv.as_ref(), func.as_ref());
+    }
+}
+```
+
+## Key Concepts Explained
+
+<Steps>
+
+### Initialize Headless Session
+
+```rust
+let headless_session = binaryninja::headless::Session::new()
+    .expect("Failed to initialize session");
+```
+
+Headless mode initialization:
+- Creates a session without UI dependencies
+- Loads core plugins (architectures, platforms, file formats)
+- Required for all headless automation
+- **Must** be created before loading binaries
+
+### Configure Logging
+
+```rust
+tracing_subscriber::fmt::init();
+let _listener = TracingLogListener::new().register();
+```
+
+Set up logging for automated workflows:
+- `tracing_subscriber` - Rust's logging infrastructure
+- `TracingLogListener` - Bridges Binary Ninja logs to Rust tracing
+- Logs appear in stdout for automated processing
+
+### Load Binary for Analysis
+
+```rust
+let bv = headless_session
+    .load(&filename)
+    .expect("Couldn't open file!");
+```
+
+Load and analyze a binary:
+- `headless_session.load()` - Opens file and runs full analysis
+- Analysis is automatic - function discovery, IL generation, etc.
+- Returns a `BinaryView` reference for further processing
+- File path can be relative or absolute
+
+### Configure Disassembly Settings
+
+```rust
+let settings = DisassemblySettings::new();
+settings.set_option(DisassemblyOption::ShowAddress, false);
+settings.set_option(DisassemblyOption::WaitForIL, true);
+settings.set_option(DisassemblyOption::IndentHLILBody, false);
+settings.set_option(DisassemblyOption::ShowCollapseIndicators, false);
+settings.set_option(DisassemblyOption::ShowFunctionHeader, false);
+```
+
+Customize output format:
+- `ShowAddress` - Include/exclude address prefixes
+- `WaitForIL` - Wait for full IL analysis before rendering
+- `IndentHLILBody` - Control indentation
+- `ShowCollapseIndicators` - UI collapse markers
+- `ShowFunctionHeader` - Function signature headers
+
+### Create Linear View for Decompilation
+
+```rust
+let linear_view = LinearViewObject::language_representation(view, &settings, "Pseudo C");
+```
+
+Linear views provide sequential code representation:
+- `"Pseudo C"` - High-level decompiled output
+- Other options: `"LLIL"`, `"MLIL"`, `"HLIL"`, `"Disassembly"`
+- Settings control how the view is rendered
+
+### Extract Decompiled Code
+
+```rust
+let mut cursor = linear_view.create_cursor();
+cursor.seek_to_address(func.highest_address());
+
+let last = view.get_next_linear_disassembly_lines(&mut cursor.duplicate());
+let first = view.get_previous_linear_disassembly_lines(&mut cursor);
+
+let lines = first.into_iter().chain(&last);
+
+for line in lines {
+    tracing::info!("{}", line);
+}
+```
+
+Navigate and extract function code:
+1. Create cursor for navigation
+2. Seek to function end
+3. Get lines backward (from end to start)
+4. Get lines forward (to end)
+5. Combine for complete function
+6. Process each line
+
+### Iterate All Functions
+
+```rust
+for func in &bv.functions() {
+    decompile_to_c(bv.as_ref(), func.as_ref());
+}
+```
+
+Process all discovered functions:
+- `bv.functions()` - Returns all functions
+- Functions are discovered during automatic analysis
+- Use `.as_ref()` to convert smart pointers to references
+
+</Steps>
+
+## Building and Running
+
+### Cargo.toml Configuration
+
+```toml
+[package]
+name = "decompile"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+binaryninja = { git = "https://github.com/Vector35/binaryninja-api", branch = "dev" }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+```
+
+### Building
+
+```bash
+cd ~/workspace/source/rust/examples
+cargo build --release --example decompile
+```
+
+### Running
+
+```bash
+cargo run --release --example decompile -- /path/to/binary
+```
+
+## Expected Output
+
+```
+2026-03-03T10:15:30.123Z INFO Loading binary...
+2026-03-03T10:15:31.456Z INFO File: `/bin/ls`
+2026-03-03T10:15:31.456Z INFO File size: `0x1a540`
+2026-03-03T10:15:31.456Z INFO Function count: 142
+
+2026-03-03T10:15:31.500Z INFO int64_t main(int32_t argc, char** argv, char** envp)
+2026-03-03T10:15:31.500Z INFO {
+2026-03-03T10:15:31.500Z INFO     void* fsbase;
+2026-03-03T10:15:31.500Z INFO     int64_t rax = *(fsbase + 0x28);
+2026-03-03T10:15:31.500Z INFO     int32_t var_58 = 0;
+2026-03-03T10:15:31.500Z INFO     ...
+2026-03-03T10:15:31.500Z INFO     return 0;
+2026-03-03T10:15:31.500Z INFO }
+```
+
+## Advanced Automation Patterns
+
+### Batch Processing Multiple Files
+
+```rust
+use std::fs;
+use std::path::Path;
+
+fn process_directory(dir: &Path, session: &binaryninja::headless::Session) {
+    for entry in fs::read_dir(dir).expect("Failed to read directory") {
+        let entry = entry.expect("Failed to read entry");
+        let path = entry.path();
+        
+        if path.is_file() {
+            match session.load(path.to_str().unwrap()) {
+                Ok(bv) => {
+                    tracing::info!("Processing: {:?}", path);
+                    // Perform analysis
+                    for func in &bv.functions() {
+                        // Process each function
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to load {:?}: {:?}", path, e);
+                }
+            }
+        }
+    }
+}
+```
+
+### Extract Specific Functions
+
+```rust
+fn find_and_decompile(bv: &BinaryView, function_name: &str) {
+    for func in &bv.functions() {
+        if func.symbol().full_name() == function_name {
+            tracing::info!("Found function: {}", function_name);
+            decompile_to_c(bv, func.as_ref());
+            return;
+        }
+    }
+    tracing::warn!("Function {} not found", function_name);
+}
+```
+
+### Export Analysis Results
+
+```rust
+use std::fs::File;
+use std::io::Write;
+
+fn export_function_list(bv: &BinaryView, output_path: &str) {
+    let mut file = File::create(output_path).expect("Failed to create file");
+    
+    writeln!(file, "Address,Name,Size").unwrap();
+    for func in &bv.functions() {
+        writeln!(file, "{:#x},{},{}",
+            func.start(),
+            func.symbol().full_name(),
+            func.total_bytes()
+        ).unwrap();
+    }
+}
+```
+
+### Wait for Analysis Completion
+
+```rust
+fn wait_for_analysis(bv: &BinaryView) {
+    while bv.update_analysis_and_wait() {
+        tracing::info!("Analysis in progress...");
+    }
+    tracing::info!("Analysis complete");
+}
+```
+
+### Custom Analysis Settings
+
+```rust
+use binaryninja::settings::Settings;
+
+fn load_with_custom_settings(session: &binaryninja::headless::Session, filename: &str) -> BinaryView {
+    let settings = Settings::new("");
+    
+    // Disable certain analysis features for speed
+    settings.set_bool("analysis.types.TemplateSimplifier", false, None, None);
+    settings.set_bool("analysis.signatureMatcher.autorun", false, None, None);
+    
+    // Load with custom settings
+    session.load_with_options(filename, true, None, |bv| {
+        // Additional BinaryView setup
+    }).expect("Failed to load binary")
+}
+```
+
+## Python Headless Automation
+
+For Python-based automation:
+
+```python
+import binaryninja as bn
+import sys
+
+def decompile_all_functions(binary_path):
+    # Load binary
+    bv = bn.load(binary_path)
+    if bv is None:
+        print(f"Failed to load {binary_path}")
+        return
+    
+    # Wait for analysis
+    bv.update_analysis_and_wait()
+    
+    # Process each function
+    for func in bv.functions:
+        print(f"\n{'='*60}")
+        print(f"Function: {func.name} @ {hex(func.start)}")
+        print('='*60)
+        
+        # Get HLIL decompilation
+        hlil = func.hlil
+        if hlil:
+            for line in hlil.root.lines:
+                print(line)
+    
+    # Close to prevent memory leaks
+    bv.file.close()
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print(f"Usage: {sys.argv[0]} <binary>")
+        sys.exit(1)
+    
+    decompile_all_functions(sys.argv[1])
+```
+
+## Use Cases
+
+- **Batch Decompilation** - Decompile entire codebases automatically
+- **Malware Analysis** - Automated triage and feature extraction
+- **Vulnerability Research** - Pattern matching across binaries
+- **Code Metrics** - Collect statistics from large binary sets
+- **Regression Testing** - Verify analysis across Binary Ninja versions
+- **Integration** - Connect Binary Ninja to CI/CD pipelines
+- **Research** - Large-scale binary analysis experiments
+
+## Performance Considerations
+
+### Optimize Analysis Speed
+
+```rust
+// Disable unnecessary analysis features
+let settings = Settings::new("");
+settings.set_string("analysis.mode", "basic", None, None);
+settings.set_bool("analysis.linearSweep.autorun", false, None, None);
+```
+
+### Parallel Processing
+
+```rust
+use rayon::prelude::*;
+
+let files: Vec<PathBuf> = /* collect files */;
+
+files.par_iter().for_each(|file| {
+    // Each thread needs its own session
+    let session = binaryninja::headless::Session::new().unwrap();
+    let bv = session.load(file.to_str().unwrap()).unwrap();
+    // Process binary
+});
+```
+
+### Memory Management
+
+```python
+# Python: Close files to prevent memory leaks
+bv.file.close()
+
+# For batch processing, process in chunks
+for chunk in chunks(file_list, 100):
+    for file in chunk:
+        bv = bn.load(file)
+        # Process
+        bv.file.close()
+```
+
+## Related Examples
+
+- [Basic Analysis](/examples/basic-analysis) - Core analysis concepts
+- [Function Iteration](/examples/function-iteration) - Working with functions
+- [IL Parsing](/examples/il-parsing) - IL-level analysis
+- [Workflow Extension](/examples/workflow-extension) - Custom analysis workflows

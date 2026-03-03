@@ -1,0 +1,517 @@
+---
+title: Symbols
+description: Working with symbols and symbol resolution in Binary Ninja
+---
+
+## Overview
+
+**Symbols** in Binary Ninja represent named entities in a binary - functions, data, imports, exports, and more. Symbols provide human-readable names for addresses and help organize and navigate code.
+
+<Info>
+Binary Ninja automatically creates symbols from binary metadata (exports, imports, debug info) and analysis (auto-discovered functions), but you can also define custom symbols.
+</Info>
+
+## Symbol Types
+
+Binary Ninja supports several symbol types:
+
+```python
+from binaryninja.enums import SymbolType
+
+SymbolType.FunctionSymbol        # Function entry point
+SymbolType.ImportedFunctionSymbol # Imported function
+SymbolType.ImportAddressSymbol   # Import address (GOT/IAT entry)
+SymbolType.DataSymbol            # Data variable
+SymbolType.ImportedDataSymbol    # Imported data
+SymbolType.ExternalSymbol        # External reference
+SymbolType.LibraryFunctionSymbol # Library function
+SymbolType.SymbolicFunctionSymbol # Symbolic/dynamic function
+```
+
+## Symbol Binding
+
+Symbols have binding levels that indicate their visibility:
+
+```python
+from binaryninja.enums import SymbolBinding
+
+SymbolBinding.NoBinding          # No specific binding
+SymbolBinding.LocalBinding       # Local to file/module
+SymbolBinding.GlobalBinding      # Global visibility
+SymbolBinding.WeakBinding        # Weak symbol (can be overridden)
+```
+
+## Creating Symbols
+
+### Basic Symbol Creation
+
+```python
+from binaryninja import Symbol, SymbolType
+
+# Create function symbol
+func_sym = Symbol(SymbolType.FunctionSymbol, 0x401000, "my_function")
+bv.define_user_symbol(func_sym)
+
+# Create data symbol
+data_sym = Symbol(SymbolType.DataSymbol, 0x404000, "g_counter")
+bv.define_user_symbol(data_sym)
+
+# Create import symbol
+import_sym = Symbol(SymbolType.ImportedFunctionSymbol, 0x403000, "printf")
+bv.define_user_symbol(import_sym)
+```
+
+### Symbols with Namespaces
+
+```python
+from binaryninja import Symbol, SymbolType, NameSpace
+
+# Create namespaced symbol (e.g., C++ namespace)
+namespace = NameSpace(["std", "vector"])
+sym = Symbol(SymbolType.FunctionSymbol, 0x401500, "push_back", 
+             namespace=namespace)
+bv.define_user_symbol(sym)
+
+# Full name will be "std::vector::push_back"
+print(sym.full_name)  # std::vector::push_back
+```
+
+### Symbol Ordinals
+
+Some symbols (particularly on Windows) have ordinal numbers:
+
+```python
+# Create symbol with ordinal
+sym = Symbol(SymbolType.ImportedFunctionSymbol, 0x403020, "Function",
+             ordinal=42)
+bv.define_user_symbol(sym)
+
+# Access ordinal
+if sym.ordinal:
+    print(f"Symbol ordinal: {sym.ordinal}")
+```
+
+## Accessing Symbols
+
+### Getting Symbols
+
+```python
+# Get all symbols
+for symbol in bv.symbols.values():
+    print(f"0x{symbol.address:x}: {symbol.full_name} ({symbol.type})")
+
+# Get symbol at address
+sym = bv.get_symbol_at(0x401000)
+if sym:
+    print(f"Symbol: {sym.name}")
+
+# Get symbols by name
+symbols = bv.get_symbols_by_name("main")
+for sym in symbols:
+    print(f"Found: {sym.full_name} at 0x{sym.address:x}")
+
+# Get symbol by raw name (without namespace)
+sym = bv.get_symbol_by_raw_name("printf")
+```
+
+### Searching Symbols
+
+```python
+# Get symbols by name with namespace
+namespace = NameSpace(["std"])
+symbols = bv.get_symbols_by_name("string", namespace)
+
+# Get symbols of specific type
+for sym in bv.symbols.values():
+    if sym.type == SymbolType.FunctionSymbol:
+        print(f"Function: {sym.name} at 0x{sym.address:x}")
+```
+
+### Symbol Properties
+
+```python
+sym = bv.get_symbol_at(0x401000)
+if sym:
+    # Basic properties
+    print(f"Name: {sym.name}")
+    print(f"Short name: {sym.short_name}")
+    print(f"Full name: {sym.full_name}")
+    print(f"Raw name: {sym.raw_name}")
+    
+    # Address and type
+    print(f"Address: 0x{sym.address:x}")
+    print(f"Type: {sym.type}")
+    print(f"Binding: {sym.binding}")
+    
+    # Namespace
+    print(f"Namespace: {sym.namespace}")
+    
+    # Auto vs user defined
+    if sym.auto:
+        print("Auto-defined symbol")
+    else:
+        print("User-defined symbol")
+```
+
+## Function Symbols
+
+### Working with Function Symbols
+
+```python
+# Get function from symbol
+sym = bv.get_symbol_by_raw_name("main")
+if sym and sym.type == SymbolType.FunctionSymbol:
+    func = bv.get_function_at(sym.address)
+    if func:
+        print(f"Function: {func.name}")
+        print(f"Type: {func.type}")
+
+# Set function name via symbol
+func = bv.get_function_at(0x401000)
+if func:
+    # Create new symbol
+    new_sym = Symbol(SymbolType.FunctionSymbol, func.start, "renamed_function")
+    bv.define_user_symbol(new_sym)
+    
+    # Function name is now "renamed_function"
+    print(func.name)
+```
+
+### Import and Export Symbols
+
+```python
+# Get all imports
+for sym in bv.symbols.values():
+    if sym.type in [SymbolType.ImportedFunctionSymbol, 
+                    SymbolType.ImportedDataSymbol]:
+        print(f"Import: {sym.name} at 0x{sym.address:x}")
+
+# Get import address symbols (GOT/IAT entries)
+for sym in bv.symbols.values():
+    if sym.type == SymbolType.ImportAddressSymbol:
+        print(f"Import address: {sym.name} at 0x{sym.address:x}")
+        
+        # Find what it imports
+        imported_func = sym.imported_function_from_import_address_symbol(
+            sym.address
+        )
+        if imported_func:
+            print(f"  -> {imported_func.name}")
+```
+
+## External Symbols and Libraries
+
+### External Symbols
+
+```python
+from binaryninja import Symbol, SymbolType
+
+# Create external symbol (reference to external library)
+ext_sym = Symbol(SymbolType.ExternalSymbol, 0, "malloc")
+bv.define_user_symbol(ext_sym)
+
+# External symbols typically have address 0
+print(f"External: {ext_sym.name} (addr: 0x{ext_sym.address:x})")
+```
+
+### Library Functions
+
+```python
+# Define library function symbol
+lib_sym = Symbol(SymbolType.LibraryFunctionSymbol, 0x401200, "strlen")
+bv.define_user_symbol(lib_sym)
+
+# Mark function as from library
+func = bv.get_function_at(0x401200)
+if func:
+    func.can_return = True  # Library functions typically return
+```
+
+## Symbol Namespaces
+
+### Working with Namespaces
+
+```python
+from binaryninja import NameSpace
+
+# Create namespace
+ns = NameSpace(["MyNamespace", "SubNamespace"])
+print(str(ns))  # "MyNamespace::SubNamespace"
+
+# Create symbol in namespace
+sym = Symbol(SymbolType.FunctionSymbol, 0x401000, "function", namespace=ns)
+bv.define_user_symbol(sym)
+print(sym.full_name)  # "MyNamespace::SubNamespace::function"
+
+# Get namespace from symbol
+if sym.namespace:
+    print(f"Namespace: {sym.namespace}")
+    print(f"Name components: {list(sym.namespace)}")
+```
+
+### C++ Mangling
+
+Binary Ninja handles name mangling for C++ symbols:
+
+```python
+# Get symbol with mangled name
+mangled_sym = bv.get_symbol_by_raw_name("_ZN3std6vectorIiE9push_backERKi")
+
+if mangled_sym:
+    print(f"Raw name: {mangled_sym.raw_name}")
+    print(f"Short name: {mangled_sym.short_name}")  # Demangled
+    print(f"Full name: {mangled_sym.full_name}")    # Fully qualified
+```
+
+## Modifying Symbols
+
+### Renaming Symbols
+
+```python
+# Method 1: Define new symbol at same address
+old_sym = bv.get_symbol_at(0x401000)
+if old_sym:
+    # Remove old symbol (optional)
+    bv.undefine_user_symbol(old_sym)
+    
+    # Create new symbol with new name
+    new_sym = Symbol(old_sym.type, old_sym.address, "new_name")
+    bv.define_user_symbol(new_sym)
+
+# Method 2: For functions, use function API
+func = bv.get_function_at(0x401000)
+if func:
+    new_sym = Symbol(SymbolType.FunctionSymbol, func.start, "new_func_name")
+    bv.define_user_symbol(new_sym)
+```
+
+### Removing Symbols
+
+```python
+# Remove user-defined symbol
+sym = bv.get_symbol_at(0x401000)
+if sym and not sym.auto:
+    bv.undefine_user_symbol(sym)
+
+# Note: Cannot remove auto symbols directly
+# They are recreated during analysis
+```
+
+## Data Symbols
+
+### Defining Data with Symbols
+
+```python
+from binaryninja import Symbol, SymbolType, Type
+
+# Define data symbol
+addr = 0x404000
+sym = Symbol(SymbolType.DataSymbol, addr, "g_config")
+bv.define_user_symbol(sym)
+
+# Also define the type
+struct_type = bv.get_type_by_name("Config")
+if struct_type:
+    bv.define_user_data_var(addr, struct_type)
+
+# Access data variable
+data_var = bv.get_data_var_at(addr)
+if data_var:
+    print(f"Data: {data_var.name} - {data_var.type}")
+```
+
+### String Symbols
+
+```python
+# Find strings and create symbols
+for string in bv.strings:
+    # Create symbol for string
+    sym_name = f"str_{string.start:x}"
+    sym = Symbol(SymbolType.DataSymbol, string.start, sym_name)
+    bv.define_user_symbol(sym)
+    
+    # Also define data variable
+    str_type = Type.array(Type.char(), string.length)
+    bv.define_user_data_var(string.start, str_type)
+```
+
+## Practical Examples
+
+### Example 1: Symbol Analysis Report
+
+```python
+def generate_symbol_report(bv):
+    """Generate comprehensive symbol report"""
+    from collections import defaultdict
+    
+    # Count symbols by type
+    type_counts = defaultdict(int)
+    auto_counts = defaultdict(int)
+    
+    for sym in bv.symbols.values():
+        type_counts[sym.type] += 1
+        if sym.auto:
+            auto_counts[sym.type] += 1
+    
+    print("=== Symbol Report ===")
+    print(f"\nTotal symbols: {len(bv.symbols)}")
+    
+    print("\nBy type:")
+    for sym_type, count in sorted(type_counts.items()):
+        auto = auto_counts[sym_type]
+        user = count - auto
+        print(f"  {sym_type.name}: {count} (auto: {auto}, user: {user})")
+    
+    # List namespaces
+    namespaces = set()
+    for sym in bv.symbols.values():
+        if sym.namespace:
+            namespaces.add(str(sym.namespace))
+    
+    if namespaces:
+        print(f"\nNamespaces ({len(namespaces)}):")
+        for ns in sorted(namespaces):
+            print(f"  {ns}")
+    
+    # List imports
+    imports = [s for s in bv.symbols.values() 
+               if s.type in [SymbolType.ImportedFunctionSymbol,
+                           SymbolType.ImportedDataSymbol]]
+    print(f"\nImports ({len(imports)}):")
+    for sym in sorted(imports, key=lambda s: s.name)[:10]:
+        print(f"  {sym.name} at 0x{sym.address:x}")
+
+bv = load("/path/to/binary")
+generate_symbol_report(bv)
+```
+
+### Example 2: Auto-Naming Functions
+
+```python
+def auto_name_wrapper_functions(bv):
+    """Automatically name wrapper functions based on their target"""
+    
+    for func in bv.functions:
+        # Skip already named functions
+        if not func.name.startswith("sub_"):
+            continue
+        
+        # Check if function is a simple wrapper
+        if len(list(func.basic_blocks)) != 1:
+            continue
+        
+        # Get the single basic block
+        block = list(func.basic_blocks)[0]
+        
+        # Check if it ends with a tail call or direct jump
+        for edge in block.outgoing_edges:
+            target_addr = edge.target.start
+            target_func = bv.get_function_at(target_addr)
+            
+            if target_func and not target_func.name.startswith("sub_"):
+                # Name wrapper after target
+                new_name = f"{target_func.name}_wrapper"
+                sym = Symbol(SymbolType.FunctionSymbol, func.start, new_name)
+                bv.define_user_symbol(sym)
+                print(f"Named wrapper: {new_name} at 0x{func.start:x}")
+                break
+
+bv = load("/path/to/binary")
+auto_name_wrapper_functions(bv)
+```
+
+### Example 3: Import Table Analysis
+
+```python
+def analyze_imports(bv):
+    """Analyze and categorize imports"""
+    from collections import defaultdict
+    
+    # Group imports by library
+    imports_by_lib = defaultdict(list)
+    
+    for sym in bv.symbols.values():
+        if sym.type == SymbolType.ImportedFunctionSymbol:
+            # Try to determine library (simplified)
+            name = sym.name
+            
+            # Common library prefixes
+            if name.startswith("_"):
+                name = name[1:]
+            
+            # Categorize
+            if any(x in name.lower() for x in ['malloc', 'free', 'calloc']):
+                lib = 'libc (memory)'
+            elif any(x in name.lower() for x in ['printf', 'scanf', 'puts']):
+                lib = 'libc (I/O)'
+            elif any(x in name.lower() for x in ['str', 'mem', 'wcs']):
+                lib = 'libc (string)'
+            elif any(x in name.lower() for x in ['socket', 'connect', 'send']):
+                lib = 'network'
+            else:
+                lib = 'other'
+            
+            imports_by_lib[lib].append(sym)
+    
+    print("=== Import Analysis ===")
+    for lib, syms in sorted(imports_by_lib.items()):
+        print(f"\n{lib} ({len(syms)} functions):")
+        for sym in sorted(syms, key=lambda s: s.name)[:10]:
+            # Find call sites
+            refs = bv.get_code_refs(sym.address)
+            print(f"  {sym.name} - {len(refs)} call sites")
+
+bv = load("/path/to/binary")
+analyze_imports(bv)
+```
+
+### Example 4: Symbol Export
+
+```python
+def export_symbols_to_file(bv, filename):
+    """Export all symbols to a text file"""
+    
+    with open(filename, 'w') as f:
+        f.write("# Binary Ninja Symbol Export\n")
+        f.write(f"# File: {bv.file.filename}\n\n")
+        
+        # Group symbols by type
+        for sym_type in [SymbolType.FunctionSymbol, 
+                        SymbolType.DataSymbol,
+                        SymbolType.ImportedFunctionSymbol]:
+            
+            symbols = [s for s in bv.symbols.values() 
+                      if s.type == sym_type]
+            
+            if not symbols:
+                continue
+            
+            f.write(f"\n# {sym_type.name}\n")
+            for sym in sorted(symbols, key=lambda s: s.address):
+                f.write(f"0x{sym.address:08x} {sym.full_name}\n")
+    
+    print(f"Exported {len(bv.symbols)} symbols to {filename}")
+
+bv = load("/path/to/binary")
+export_symbols_to_file(bv, "symbols.txt")
+```
+
+## Symbol Best Practices
+
+<Note>
+**Best Practices:**
+
+1. **Use descriptive names** - Choose names that describe the function/data purpose
+2. **Maintain namespaces** - Use namespaces for organized code (especially C++)
+3. **Preserve auto symbols** - Don't remove auto symbols unless necessary
+4. **Document with comments** - Use comments alongside symbols for context
+5. **Type information** - Associate symbols with appropriate types
+6. **Consistency** - Follow consistent naming conventions
+</Note>
+
+## Related Concepts
+
+- [Functions](./functions) - Function analysis and manipulation
+- [Types](./types) - Type system and associations
+- [Binary Views](./binary-views) - Symbol context and storage
+- [Intermediate Languages](./intermediate-languages) - IL and symbol references

@@ -1,0 +1,222 @@
+---
+title: Headless mode (Rust)
+description: Rust API for headless automation
+---
+
+The headless module provides initialization and automation capabilities for Binary Ninja without the GUI.
+
+<Note>
+  Headless mode requires a Binary Ninja license that supports headless operation.
+</Note>
+
+## Session
+
+The `Session` type manages Binary Ninja initialization and shutdown:
+
+```rust
+use binaryninja::headless::Session;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize Binary Ninja
+    let session = Session::new()?;
+
+    // Use Binary Ninja APIs
+    let bv = session.load("/path/to/binary")?;
+
+    // Session automatically shuts down when dropped
+    Ok(())
+}
+```
+
+From [`rust/src/headless.rs`](https://github.com/Vector35/binaryninja-api/blob/dev/rust/src/headless.rs)
+
+<Warning>
+  Always use `Session` for proper initialization and cleanup. Do not call `init()` and `shutdown()` directly unless you have specific requirements.
+</Warning>
+
+## Initialization options
+
+```rust
+use binaryninja::headless::{InitializationOptions, Session};
+use std::time::Duration;
+
+// Custom initialization
+let options = InitializationOptions {
+    license: Some("your-license-key".to_string()),
+    checkout_license: true,
+    register_main_thread_handler: true,
+    floating_license_duration: Duration::from_secs(3600),
+    ..Default::default()
+};
+
+let session = Session::new_with_opts(options)?;
+```
+
+## Loading binaries
+
+```rust
+use binaryninja::headless::Session;
+
+let session = Session::new()?;
+
+// Load with auto-detection
+let bv = session.load("/bin/ls")?;
+
+// Load specific format
+let elf_bv = session.load_view("/path/to/elf", "ELF")?;
+```
+
+## Progress callbacks
+
+Monitor analysis progress:
+
+```rust
+use binaryninja::progress::ProgressCallback;
+
+struct MyProgress;
+
+impl ProgressCallback for MyProgress {
+    fn on_progress(&self, current: usize, total: usize) -> bool {
+        println!("Progress: {}/{}", current, total);
+        true  // Continue analysis
+    }
+}
+
+// Use with analysis
+let progress = MyProgress;
+bv.update_analysis_with_progress(&progress);
+```
+
+## Batch processing
+
+```rust
+use binaryninja::headless::Session;
+use std::path::Path;
+
+fn analyze_directory(dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let session = Session::new()?;
+
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_file() {
+            println!("Analyzing: {:?}", path);
+
+            match session.load(&path) {
+                Ok(bv) => {
+                    // Analyze binary
+                    println!("  Functions: {}", bv.functions().len());
+                }
+                Err(e) => {
+                    eprintln!("  Failed to load: {:?}", e);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+```
+
+## Automation example
+
+Complete decompilation automation:
+
+```rust
+use binaryninja::headless::Session;
+use binaryninja::binary_view::BinaryViewExt;
+use std::fs::File;
+use std::io::Write;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let session = Session::new()?;
+    let bv = session.load("/bin/cat")?;
+
+    let mut output = File::create("decompiled.c")?;
+
+    // Decompile all functions
+    for func in bv.functions().iter() {
+        if let Ok(hlil) = func.high_level_il() {
+            writeln!(output, "// Function: {}", func.symbol().full_name())?;
+            writeln!(output, "{:?}\n", hlil.root())?;
+        }
+    }
+
+    println!("Decompiled {} functions", bv.functions().len());
+    Ok(())
+}
+```
+
+From [`rust/examples/decompile.rs`](https://github.com/Vector35/binaryninja-api/blob/dev/rust/examples/decompile.rs)
+
+## Enterprise licensing
+
+```rust
+use binaryninja::enterprise;
+
+// Check out floating license
+enterprise::checkout_license(Duration::from_secs(3600))?;
+
+// Release license
+enterprise::release_license(false)?;
+```
+
+## Shutdown
+
+```rust
+// Manual shutdown (usually not needed)
+use binaryninja::headless;
+
+headless::shutdown();
+```
+
+<Note>
+  The `Session` automatically handles shutdown when dropped. Manual shutdown is rarely needed.
+</Note>
+
+## Complete example
+
+```rust
+use binaryninja::headless::Session;
+use binaryninja::binary_view::BinaryViewExt;
+use std::env;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = env::args().collect();
+    if args.len() != 2 {
+        eprintln!("Usage: {} <binary>", args[0]);
+        return Ok(());
+    }
+
+    // Initialize
+    let session = Session::new()?;
+
+    // Load binary
+    let bv = session.load(&args[1])?;
+
+    println!("=== Binary Analysis ===");
+    println!("File: {}", bv.file().filename());
+    println!("Architecture: {}", bv.arch().name());
+    println!("Functions: {}", bv.functions().len());
+
+    // Analyze functions
+    for func in bv.functions().iter().take(5) {
+        println!("\n{}:", func.symbol().full_name());
+        println!("  Address: {:#x}", func.start());
+        println!("  Size: {:#x} bytes", func.total_bytes());
+        println!("  Blocks: {}", func.basic_blocks().len());
+    }
+
+    Ok(())
+}
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Binary view" href="/api/rust/binary-view">
+    Work with binary files
+  </Card>
+  <Card title="Examples" href="/examples/headless-automation">
+    See automation examples
+  </Card>
+</CardGroup>
