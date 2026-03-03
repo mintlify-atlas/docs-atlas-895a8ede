@@ -1,0 +1,161 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Binary Ninja API",
+  "projectDescription": "Multi-language API for building plugins and extending the Binary Ninja reverse engineering platform",
+  "theme": "aspen",
+  "primaryColor": "#c92a2a",
+  "lightColor": "#ff6b6b",
+  "darkColor": "#a61e1e",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/binary-views",
+              "concepts/architectures",
+              "concepts/intermediate-languages",
+              "concepts/functions",
+              "concepts/types",
+              "concepts/symbols"
+            ]
+          },
+          {
+            "group": "Plugin Development",
+            "pages": [
+              "plugins/getting-started",
+              "plugins/architecture-plugins",
+              "plugins/binary-view-plugins",
+              "plugins/ui-plugins",
+              "plugins/workflow-plugins"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/binary-analysis",
+              "guides/il-operations",
+              "guides/data-flow-analysis",
+              "guides/debugging",
+              "guides/collaboration"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Python API",
+            "pages": [
+              "api/python/overview",
+              "api/python/binaryview",
+              "api/python/function",
+              "api/python/architecture",
+              "api/python/lowlevelil",
+              "api/python/mediumlevelil",
+              "api/python/highlevelil",
+              "api/python/types",
+              "api/python/platform",
+              "api/python/settings"
+            ]
+          },
+          {
+            "group": "C++ API",
+            "pages": [
+              "api/cpp/overview",
+              "api/cpp/binaryview",
+              "api/cpp/function",
+              "api/cpp/architecture",
+              "api/cpp/il",
+              "api/cpp/types"
+            ]
+          },
+          {
+            "group": "Rust API",
+            "pages": [
+              "api/rust/overview",
+              "api/rust/binary-view",
+              "api/rust/function",
+              "api/rust/architecture",
+              "api/rust/il",
+              "api/rust/headless"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Examples",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "examples/basic-analysis",
+              "examples/function-iteration",
+              "examples/il-parsing"
+            ]
+          },
+          {
+            "group": "Plugin Examples",
+            "pages": [
+              "examples/architecture-hook",
+              "examples/binary-view-loader",
+              "examples/ui-integration",
+              "examples/workflow-extension"
+            ]
+          },
+          {
+            "group": "Advanced",
+            "pages": [
+              "examples/headless-automation",
+              "examples/custom-il-visitor",
+              "examples/type-library"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Multi-language API bindings (C++, Python, Rust)",
+    "Three-level intermediate language representation (LLIL, MLIL, HLIL)",
+    "Extensible architecture with plugin support",
+    "Multiple architecture support (x86, ARM64, MIPS, PPC, RISC-V)",
+    "Binary format loaders (ELF, PE, Mach-O, etc.)",
+    "Debug info integration (DWARF, PDB)",
+    "Workflow and analysis pipeline customization",
+    "Headless automation capabilities"
+  ],
+  "publicApiSurface": [
+    "BinaryView",
+    "Function",
+    "Architecture",
+    "LowLevelILFunction",
+    "MediumLevelILFunction",
+    "HighLevelILFunction",
+    "BasicBlock",
+    "Type",
+    "Symbol",
+    "Platform",
+    "Settings",
+    "Metadata",
+    "BackgroundTask",
+    "Database",
+    "DebugInfo",
+    "TypeLibrary",
+    "Workflow",
+    "DataRenderer",
+    "FlowGraph",
+    "Variable"
+  ]
+}
